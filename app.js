@@ -46,6 +46,8 @@
   let drag = null;
   let toastTimer = null;
   let saveTimer = null;
+  let shapeEditId = null;
+  let selectedVertexIndex = null;
 
   const el = {};
   const ids = [
@@ -54,7 +56,7 @@
     "resetViewBtn", "canvasFrame", "floorPlan", "emptyHint", "mobileZoneList", "mobileFurnitureList", "nothingSelected",
     "itemInspector", "itemName", "itemWidth", "itemDepth", "itemX", "itemY", "deleteItemBtn", "rotateItemBtn",
     "zoneInspector", "zoneName", "zoneType", "zoneWidth", "zoneDepth", "zoneX", "zoneY", "deleteZoneBtn",
-    "duplicateZoneBtn", "zoneFitStatus",
+    "duplicateZoneBtn", "zoneFitStatus", "zoneShapeEditBtn", "shapeEditTools", "deleteVertexBtn", "resetZoneShapeBtn",
     "duplicateItemBtn", "fitStatus", "customDialog", "customForm", "customName", "customWidth", "customDepth",
     "confirmCustomBtn", "exportDialog", "closeExportBtn", "exportPngBtn", "exportJsonBtn", "importJsonInput", "toast"
   ];
@@ -105,6 +107,8 @@
   function restore(serialized) {
     const restored = JSON.parse(serialized);
     state = { ...structuredClone(initialState), ...restored, room: { ...initialState.room, ...restored.room } };
+    shapeEditId = null;
+    selectedVertexIndex = null;
     renderAll();
     scheduleSave();
   }
@@ -181,16 +185,86 @@
     zone.y = clamp(zone.y, 0, Math.max(0, state.room.depth - zone.depth));
   }
 
+  function getZoneLocalPoints(zone) {
+    if (Array.isArray(zone.points) && zone.points.length >= 3) return zone.points;
+    return [{ x: 0, y: 0 }, { x: zone.width, y: 0 }, { x: zone.width, y: zone.depth }, { x: 0, y: zone.depth }];
+  }
+
+  function getZoneAbsolutePoints(zone) {
+    return getZoneLocalPoints(zone).map(point => ({ x: zone.x + point.x, y: zone.y + point.y }));
+  }
+
+  function pointOnSegment(x, y, a, b) {
+    const cross = (x - a.x) * (b.y - a.y) - (y - a.y) * (b.x - a.x);
+    if (Math.abs(cross) > .01) return false;
+    const dot = (x - a.x) * (x - b.x) + (y - a.y) * (y - b.y);
+    return dot <= .01;
+  }
+
+  function pointInPolygon(x, y, points) {
+    let inside = false;
+    for (let index = 0, previousIndex = points.length - 1; index < points.length; previousIndex = index, index += 1) {
+      const current = points[index];
+      const previous = points[previousIndex];
+      if (pointOnSegment(x, y, previous, current)) return true;
+      const intersects = ((current.y > y) !== (previous.y > y)) && (x < (previous.x - current.x) * (y - current.y) / (previous.y - current.y) + current.x);
+      if (intersects) inside = !inside;
+    }
+    return inside;
+  }
+
+  function polygonCentroid(points) {
+    let area = 0;
+    let centerX = 0;
+    let centerY = 0;
+    for (let index = 0; index < points.length; index += 1) {
+      const current = points[index];
+      const next = points[(index + 1) % points.length];
+      const cross = current.x * next.y - next.x * current.y;
+      area += cross;
+      centerX += (current.x + next.x) * cross;
+      centerY += (current.y + next.y) * cross;
+    }
+    if (Math.abs(area) > .01) {
+      const factor = 1 / (3 * area);
+      return { x: centerX * factor, y: centerY * factor };
+    }
+    return points.reduce((sum, point) => ({ x: sum.x + point.x / points.length, y: sum.y + point.y / points.length }), { x: 0, y: 0 });
+  }
+
+  function normalizeZonePoints(zone) {
+    const absolute = getZoneAbsolutePoints(zone);
+    const minX = Math.min(...absolute.map(point => point.x));
+    const minY = Math.min(...absolute.map(point => point.y));
+    const maxX = Math.max(...absolute.map(point => point.x));
+    const maxY = Math.max(...absolute.map(point => point.y));
+    zone.x = clamp(minX, 0, state.room.width);
+    zone.y = clamp(minY, 0, state.room.depth);
+    zone.width = Math.max(1, maxX - minX);
+    zone.depth = Math.max(1, maxY - minY);
+    zone.points = absolute.map(point => ({ x: point.x - minX, y: point.y - minY }));
+    keepZoneInside(zone);
+  }
+
   function isPointInsideAnyZone(x, y) {
-    return state.zones.some(zone => x >= zone.x && x <= zone.x + zone.width && y >= zone.y && y <= zone.y + zone.depth);
+    return state.zones.some(zone => pointInPolygon(x, y, getZoneAbsolutePoints(zone)));
   }
 
   function isRectCoveredByZones(rect) {
     if (!state.zones.length) return false;
     const right = rect.x + rect.width;
     const bottom = rect.y + rect.depth;
-    const xs = [rect.x, right, ...state.zones.flatMap(zone => [zone.x, zone.x + zone.width]).filter(x => x > rect.x && x < right)].sort((a, b) => a - b);
-    const ys = [rect.y, bottom, ...state.zones.flatMap(zone => [zone.y, zone.y + zone.depth]).filter(y => y > rect.y && y < bottom)].sort((a, b) => a - b);
+    const boundaryChecks = [
+      [rect.x, rect.y], [right, rect.y],
+      [right, bottom], [rect.x, bottom],
+      [(rect.x + right) / 2, rect.y], [right, (rect.y + bottom) / 2],
+      [(rect.x + right) / 2, bottom], [rect.x, (rect.y + bottom) / 2]
+    ];
+    if (boundaryChecks.some(([x, y]) => !isPointInsideAnyZone(x, y))) return false;
+
+    const allPoints = state.zones.flatMap(getZoneAbsolutePoints);
+    const xs = [rect.x, right, ...allPoints.map(point => point.x).filter(x => x > rect.x && x < right)].sort((a, b) => a - b);
+    const ys = [rect.y, bottom, ...allPoints.map(point => point.y).filter(y => y > rect.y && y < bottom)].sort((a, b) => a - b);
     for (let xi = 0; xi < xs.length - 1; xi += 1) {
       for (let yi = 0; yi < ys.length - 1; yi += 1) {
         const middleX = (xs[xi] + xs[xi + 1]) / 2;
@@ -295,6 +369,8 @@
     keepZoneInside(zone);
     state.zones.push(zone);
     state.selectedId = zone.id;
+    shapeEditId = null;
+    selectedVertexIndex = null;
     renderAll();
     scheduleSave();
     showToast(`${zone.name} 구역을 추가했어요`);
@@ -306,6 +382,8 @@
     pushHistory();
     state.zones = state.zones.filter(candidate => candidate.id !== zone.id);
     state.selectedId = null;
+    shapeEditId = null;
+    selectedVertexIndex = null;
     renderAll();
     scheduleSave();
     showToast(`${zone.name} 구역을 삭제했어요`);
@@ -316,7 +394,7 @@
     if (!original) return;
     pushHistory();
     const copy = {
-      ...original,
+      ...structuredClone(original),
       id: uid("zone"),
       name: `${original.name} 복사본`,
       x: original.x + state.room.grid,
@@ -325,6 +403,8 @@
     keepZoneInside(copy);
     state.zones.push(copy);
     state.selectedId = copy.id;
+    shapeEditId = null;
+    selectedVertexIndex = null;
     renderAll();
     scheduleSave();
     showToast("구역을 복제했어요");
@@ -415,17 +495,23 @@
       if (zone.id === state.selectedId) {
         group.appendChild(svgNode("rect", { x: zone.x - 6, y: zone.y - 6, width: zone.width + 12, height: zone.depth + 12, rx: 4, class: "selection-halo" }));
       }
-      group.appendChild(svgNode("rect", { x: zone.x, y: zone.y, width: zone.width, height: zone.depth, rx: 1, class: "zone-shape" }));
-      if (state.showGrid) group.appendChild(svgNode("rect", { x: zone.x, y: zone.y, width: zone.width, height: zone.depth, class: "grid-fill", "pointer-events": "none" }));
+      const absolutePoints = getZoneAbsolutePoints(zone);
+      const pointsText = absolutePoints.map(point => `${point.x},${point.y}`).join(" ");
+      const clip = svgNode("clipPath", { id: `clip-${zone.id}` });
+      clip.appendChild(svgNode("polygon", { points: pointsText }));
+      defs.appendChild(clip);
+      group.appendChild(svgNode("polygon", { points: pointsText, class: "zone-shape" }));
+      if (state.showGrid) group.appendChild(svgNode("rect", { x: zone.x, y: zone.y, width: zone.width, height: zone.depth, class: "grid-fill", "clip-path": `url(#clip-${zone.id})`, "pointer-events": "none" }));
 
       const minDimension = Math.min(zone.width, zone.depth);
+      const center = polygonCentroid(absolutePoints);
       if (minDimension >= 55) {
-        const label = svgNode("text", { x: zone.x + zone.width / 2, y: zone.y + zone.depth / 2 - 5, class: "zone-label" });
+        const label = svgNode("text", { x: center.x, y: center.y - 5, class: "zone-label" });
         label.textContent = compactName(zone.name, zone.width);
         group.appendChild(label);
       }
       if (minDimension >= 80) {
-        const dim = svgNode("text", { x: zone.x + zone.width / 2, y: zone.y + zone.depth / 2 + 14, class: "zone-dim" });
+        const dim = svgNode("text", { x: center.x, y: center.y + 14, class: "zone-dim" });
         dim.textContent = `${zone.width}×${zone.depth}`;
         group.appendChild(dim);
       }
@@ -481,7 +567,54 @@
       el.floorPlan.appendChild(group);
     });
 
+    const activeZone = selectedZone();
+    if (activeZone) renderZoneControls(activeZone);
     el.emptyHint.hidden = state.zones.length !== 0;
+  }
+
+  function renderZoneControls(zone) {
+    const handleSize = Math.max(8, Math.min(state.room.width, state.room.depth) / 36);
+    const layer = svgNode("g", { class: "zone-control-layer", "data-id": zone.id });
+    layer.appendChild(svgNode("rect", { x: zone.x, y: zone.y, width: zone.width, height: zone.depth, class: "zone-bounds" }));
+
+    if (shapeEditId === zone.id) {
+      const points = getZoneAbsolutePoints(zone);
+      points.forEach((point, index) => {
+        const next = points[(index + 1) % points.length];
+        const middleX = (point.x + next.x) / 2;
+        const middleY = (point.y + next.y) / 2;
+        const edge = svgNode("circle", { cx: middleX, cy: middleY, r: handleSize * .48, class: "edge-handle" });
+        edge.dataset.id = zone.id;
+        edge.dataset.edgeIndex = index;
+        edge.setAttribute("aria-label", `${index + 1}번 변에 꼭짓점 추가`);
+        edge.addEventListener("pointerdown", startAddVertex);
+        layer.appendChild(edge);
+        const plus = svgNode("text", { x: middleX, y: middleY, class: "edge-plus", "font-size": handleSize * .9 });
+        plus.textContent = "+";
+        layer.appendChild(plus);
+      });
+
+      points.forEach((point, index) => {
+        const vertex = svgNode("circle", { cx: point.x, cy: point.y, r: handleSize * .62, class: `vertex-handle${selectedVertexIndex === index ? " is-active" : ""}` });
+        vertex.dataset.id = zone.id;
+        vertex.dataset.vertexIndex = index;
+        vertex.setAttribute("aria-label", `${index + 1}번 꼭짓점 이동`);
+        vertex.addEventListener("pointerdown", startVertexDrag);
+        layer.appendChild(vertex);
+      });
+    } else {
+      const handles = { nw: [zone.x, zone.y], n: [zone.x + zone.width / 2, zone.y], ne: [zone.x + zone.width, zone.y], e: [zone.x + zone.width, zone.y + zone.depth / 2], se: [zone.x + zone.width, zone.y + zone.depth], s: [zone.x + zone.width / 2, zone.y + zone.depth], sw: [zone.x, zone.y + zone.depth], w: [zone.x, zone.y + zone.depth / 2] };
+      Object.entries(handles).forEach(([name, [x, y]]) => {
+        const handle = svgNode("rect", { x: x - handleSize / 2, y: y - handleSize / 2, width: handleSize, height: handleSize, rx: handleSize * .15, class: "resize-handle", "data-handle": name });
+        handle.dataset.id = zone.id;
+        handle.dataset.handle = name;
+        handle.setAttribute("aria-label", `${name} 방향으로 구역 크기 조절`);
+        handle.addEventListener("pointerdown", startZoneResize);
+        layer.appendChild(handle);
+      });
+    }
+
+    el.floorPlan.appendChild(layer);
   }
 
   function compactName(name, availableWidth) {
@@ -538,6 +671,11 @@
       const fits = zone.width <= state.room.width && zone.depth <= state.room.depth;
       el.zoneFitStatus.classList.toggle("invalid", !fits);
       el.zoneFitStatus.querySelector("span:last-child").textContent = fits ? "전체 도면 안에 들어와 있어요" : "구역이 전체 도면보다 커요";
+      const editingShape = shapeEditId === zone.id;
+      el.zoneShapeEditBtn.setAttribute("aria-pressed", String(editingShape));
+      el.zoneShapeEditBtn.querySelector("span").textContent = editingShape ? "편집 완료" : "모양 편집";
+      el.shapeEditTools.hidden = !editingShape;
+      el.deleteVertexBtn.disabled = selectedVertexIndex === null || getZoneLocalPoints(zone).length <= 3;
     }
   }
 
@@ -563,14 +701,64 @@
 
   function selectItem(id) {
     if (state.selectedId !== id) state.selectedId = id;
+    shapeEditId = null;
+    selectedVertexIndex = null;
     renderPlan();
     renderInspector();
   }
 
   function selectZone(id) {
-    if (state.selectedId !== id) state.selectedId = id;
+    if (state.selectedId !== id) {
+      state.selectedId = id;
+      if (shapeEditId !== id) {
+        shapeEditId = null;
+        selectedVertexIndex = null;
+      }
+    }
     renderPlan();
     renderInspector();
+  }
+
+  function toggleZoneShapeEdit() {
+    const zone = selectedZone();
+    if (!zone) return;
+    if (shapeEditId === zone.id) {
+      shapeEditId = null;
+      selectedVertexIndex = null;
+      showToast("모양 편집을 마쳤어요");
+    } else {
+      if (!Array.isArray(zone.points)) zone.points = getZoneLocalPoints(zone).map(point => ({ ...point }));
+      shapeEditId = zone.id;
+      selectedVertexIndex = null;
+      showToast("꼭짓점과 + 핸들을 드래그해 보세요");
+    }
+    renderAll();
+    scheduleSave();
+  }
+
+  function resetSelectedZoneShape() {
+    const zone = selectedZone();
+    if (!zone) return;
+    pushHistory();
+    zone.points = [{ x: 0, y: 0 }, { x: zone.width, y: 0 }, { x: zone.width, y: zone.depth }, { x: 0, y: zone.depth }];
+    selectedVertexIndex = null;
+    renderAll();
+    scheduleSave();
+    showToast("직사각형 모양으로 되돌렸어요");
+  }
+
+  function deleteSelectedVertex() {
+    const zone = selectedZone();
+    if (!zone || selectedVertexIndex === null) return;
+    const points = getZoneLocalPoints(zone);
+    if (points.length <= 3) return;
+    pushHistory();
+    points.splice(selectedVertexIndex, 1);
+    normalizeZonePoints(zone);
+    selectedVertexIndex = null;
+    renderAll();
+    scheduleSave();
+    showToast("꼭짓점을 삭제했어요");
   }
 
   function svgPoint(event) {
@@ -579,6 +767,67 @@
     point.y = event.clientY;
     const matrix = el.floorPlan.getScreenCTM();
     return matrix ? point.matrixTransform(matrix.inverse()) : { x: 0, y: 0 };
+  }
+
+  function startZoneResize(event) {
+    if (event.button !== undefined && event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const id = event.currentTarget.dataset.id;
+    const zone = state.zones.find(candidate => candidate.id === id);
+    if (!zone) return;
+    pushHistory();
+    const point = svgPoint(event);
+    drag = { kind: "zone-resize", id, handle: event.currentTarget.dataset.handle, pointerId: event.pointerId, startPoint: point, original: structuredClone(zone), moved: false };
+    el.floorPlan.setPointerCapture?.(event.pointerId);
+    el.floorPlan.addEventListener("pointermove", moveDrag);
+    el.floorPlan.addEventListener("pointerup", endDrag);
+    el.floorPlan.addEventListener("pointercancel", endDrag);
+  }
+
+  function startVertexDrag(event) {
+    if (event.button !== undefined && event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const id = event.currentTarget.dataset.id;
+    const zone = state.zones.find(candidate => candidate.id === id);
+    const index = Number(event.currentTarget.dataset.vertexIndex);
+    if (!zone || !Number.isInteger(index)) return;
+    if (!Array.isArray(zone.points)) zone.points = getZoneLocalPoints(zone).map(point => ({ ...point }));
+    selectedVertexIndex = index;
+    pushHistory();
+    drag = { kind: "zone-vertex", id, vertexIndex: index, pointerId: event.pointerId, moved: false };
+    el.floorPlan.setPointerCapture?.(event.pointerId);
+    el.floorPlan.addEventListener("pointermove", moveDrag);
+    el.floorPlan.addEventListener("pointerup", endDrag);
+    el.floorPlan.addEventListener("pointercancel", endDrag);
+    renderPlan();
+    renderInspector();
+  }
+
+  function startAddVertex(event) {
+    if (event.button !== undefined && event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const id = event.currentTarget.dataset.id;
+    const zone = state.zones.find(candidate => candidate.id === id);
+    const edgeIndex = Number(event.currentTarget.dataset.edgeIndex);
+    if (!zone || !Number.isInteger(edgeIndex)) return;
+    if (!Array.isArray(zone.points)) zone.points = getZoneLocalPoints(zone).map(point => ({ ...point }));
+    const points = zone.points;
+    const current = points[edgeIndex];
+    const next = points[(edgeIndex + 1) % points.length];
+    const inserted = { x: (current.x + next.x) / 2, y: (current.y + next.y) / 2 };
+    pushHistory();
+    points.splice(edgeIndex + 1, 0, inserted);
+    selectedVertexIndex = edgeIndex + 1;
+    renderPlan();
+    renderInspector();
+    drag = { kind: "zone-vertex", id, vertexIndex: selectedVertexIndex, pointerId: event.pointerId, moved: true };
+    el.floorPlan.setPointerCapture?.(event.pointerId);
+    el.floorPlan.addEventListener("pointermove", moveDrag);
+    el.floorPlan.addEventListener("pointerup", endDrag);
+    el.floorPlan.addEventListener("pointercancel", endDrag);
   }
 
   function startDrag(event) {
@@ -621,8 +870,59 @@
     el.floorPlan.addEventListener("pointercancel", endDrag);
   }
 
+  function moveZoneResize(event) {
+    const zone = state.zones.find(candidate => candidate.id === drag.id);
+    if (!zone) return;
+    const point = svgPoint(event);
+    if (state.snap) {
+      point.x = Math.round(point.x / state.room.grid) * state.room.grid;
+      point.y = Math.round(point.y / state.room.grid) * state.room.grid;
+    }
+    const original = drag.original;
+    const right = original.x + original.width;
+    const bottom = original.y + original.depth;
+    let x = original.x;
+    let y = original.y;
+    let width = original.width;
+    let depth = original.depth;
+    const handle = drag.handle;
+    if (handle.includes("e")) width = clamp(point.x - original.x, 20, state.room.width - original.x);
+    if (handle.includes("w")) { x = clamp(point.x, 0, right - 20); width = right - x; }
+    if (handle.includes("s")) depth = clamp(point.y - original.y, 20, state.room.depth - original.y);
+    if (handle.includes("n")) { y = clamp(point.y, 0, bottom - 20); depth = bottom - y; }
+    zone.x = x;
+    zone.y = y;
+    zone.width = width;
+    zone.depth = depth;
+    if (Array.isArray(original.points)) {
+      zone.points = original.points.map(pointValue => ({ x: pointValue.x * width / original.width, y: pointValue.y * depth / original.depth }));
+    }
+    drag.moved = drag.moved || Math.abs(width - original.width) > .1 || Math.abs(depth - original.depth) > .1 || Math.abs(x - original.x) > .1 || Math.abs(y - original.y) > .1;
+    renderPlan();
+    renderInspector();
+  }
+
+  function moveZoneVertex(event) {
+    const zone = state.zones.find(candidate => candidate.id === drag.id);
+    if (!zone || !Array.isArray(zone.points)) return;
+    const point = svgPoint(event);
+    let x = clamp(point.x, 0, state.room.width);
+    let y = clamp(point.y, 0, state.room.depth);
+    if (state.snap) {
+      x = Math.round(x / state.room.grid) * state.room.grid;
+      y = Math.round(y / state.room.grid) * state.room.grid;
+    }
+    zone.points[drag.vertexIndex] = { x: x - zone.x, y: y - zone.y };
+    normalizeZonePoints(zone);
+    drag.moved = true;
+    renderPlan();
+    renderInspector();
+  }
+
   function moveDrag(event) {
     if (!drag || event.pointerId !== drag.pointerId) return;
+    if (drag.kind === "zone-resize") return moveZoneResize(event);
+    if (drag.kind === "zone-vertex") return moveZoneVertex(event);
     const subject = drag.kind === "zone" ? state.zones.find(candidate => candidate.id === drag.id) : state.items.find(candidate => candidate.id === drag.id);
     if (!subject) return;
     const point = svgPoint(event);
@@ -655,6 +955,8 @@
   function onPlanPointerDown(event) {
     if (event.target === el.floorPlan || event.target.classList.contains("room-floor") || event.target.classList.contains("grid-fill")) {
       state.selectedId = null;
+      shapeEditId = null;
+      selectedVertexIndex = null;
       renderPlan();
       renderInspector();
     }
@@ -701,6 +1003,12 @@
     else value = number(rawValue, oldValue, 0, ROOM_MAX);
     if (value === oldValue) return;
     pushHistory();
+    if (Array.isArray(zone.points) && field === "width") {
+      zone.points = zone.points.map(point => ({ x: point.x * value / zone.width, y: point.y }));
+    }
+    if (Array.isArray(zone.points) && field === "depth") {
+      zone.points = zone.points.map(point => ({ x: point.x, y: point.y * value / zone.depth }));
+    }
     zone[field] = value;
     keepZoneInside(zone);
     renderAll();
@@ -741,7 +1049,7 @@
   function exportJson() {
     const data = {
       app: "방그림",
-      version: 2,
+      version: 3,
       exportedAt: new Date().toISOString(),
       ...JSON.parse(snapshot()),
       selectedId: null
@@ -775,15 +1083,19 @@
     ctx.fillRect(ox, oy, room.width * scale, room.depth * scale);
     const zoneColors = { living: "#edc57e", bathroom: "#b9cde6", kitchen: "#c9dfcb", entry: "#d7d4ce", balcony: "#c9dce2", custom: "#dfd1bc" };
     state.zones.forEach(zone => {
-      const x = ox + zone.x * scale;
-      const y = oy + zone.y * scale;
-      const w = zone.width * scale;
-      const h = zone.depth * scale;
+      const points = getZoneAbsolutePoints(zone);
+      ctx.beginPath();
+      points.forEach((point, index) => {
+        const x = ox + point.x * scale;
+        const y = oy + point.y * scale;
+        index === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      });
+      ctx.closePath();
       ctx.fillStyle = zoneColors[zone.type] || zoneColors.custom;
       ctx.strokeStyle = "#3c4037";
       ctx.lineWidth = 6;
-      ctx.fillRect(x, y, w, h);
-      ctx.strokeRect(x, y, w, h);
+      ctx.fill();
+      ctx.stroke();
     });
 
     if (state.showGrid) {
@@ -805,14 +1117,14 @@
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     state.zones.forEach(zone => {
-      const x = ox + zone.x * scale;
-      const y = oy + zone.y * scale;
+      const points = getZoneAbsolutePoints(zone);
+      const center = polygonCentroid(points);
       const w = zone.width * scale;
       const h = zone.depth * scale;
       if (Math.min(w, h) > 54) {
         ctx.fillStyle = "#332f28";
         ctx.font = `700 ${Math.max(14, Math.min(24, Math.min(w, h) * .13))}px sans-serif`;
-        ctx.fillText(`${zone.name} · ${zone.width}×${zone.depth}`, x + w / 2, y + h / 2);
+        ctx.fillText(`${zone.name} · ${Math.round(zone.width)}×${Math.round(zone.depth)}`, ox + center.x * scale, oy + center.y * scale);
       }
     });
 
@@ -866,7 +1178,8 @@
             width: number(zone.width, 160, 20, ROOM_MAX),
             depth: number(zone.depth, 160, 20, ROOM_MAX),
             x: number(zone.x, 0, 0, ROOM_MAX),
-            y: number(zone.y, 0, 0, ROOM_MAX)
+            y: number(zone.y, 0, 0, ROOM_MAX),
+            points: Array.isArray(zone.points) && zone.points.length >= 3 ? zone.points.map(point => ({ x: number(point.x, 0, 0, ROOM_MAX), y: number(point.y, 0, 0, ROOM_MAX) })) : undefined
           })),
           items: imported.items.map(item => ({
             ...item,
@@ -925,7 +1238,13 @@
     });
     el.gridToggle.addEventListener("change", () => { state.showGrid = el.gridToggle.checked; renderPlan(); scheduleSave(); });
     el.snapToggle.addEventListener("change", () => { state.snap = el.snapToggle.checked; scheduleSave(); });
-    el.resetViewBtn.addEventListener("click", () => { state.selectedId = null; renderPlan(); renderInspector(); });
+    el.resetViewBtn.addEventListener("click", () => {
+      state.selectedId = null;
+      shapeEditId = null;
+      selectedVertexIndex = null;
+      renderPlan();
+      renderInspector();
+    });
     el.floorPlan.addEventListener("pointerdown", onPlanPointerDown);
 
     el.itemName.addEventListener("change", () => changeSelectedField("name", el.itemName.value));
@@ -944,6 +1263,9 @@
     el.zoneY.addEventListener("change", () => changeZoneField("y", el.zoneY.value));
     el.deleteZoneBtn.addEventListener("click", deleteSelectedZone);
     el.duplicateZoneBtn.addEventListener("click", duplicateSelectedZone);
+    el.zoneShapeEditBtn.addEventListener("click", toggleZoneShapeEdit);
+    el.deleteVertexBtn.addEventListener("click", deleteSelectedVertex);
+    el.resetZoneShapeBtn.addEventListener("click", resetSelectedZoneShape);
     el.undoBtn.addEventListener("click", undo);
     el.redoBtn.addEventListener("click", redo);
 
@@ -972,7 +1294,10 @@
       const zone = selectedZone();
       if (typing || (!item && !zone)) return;
       if (event.key === "Delete" || event.key === "Backspace") {
-        event.preventDefault(); item ? deleteSelected() : deleteSelectedZone(); return;
+        event.preventDefault();
+        if (zone && shapeEditId === zone.id && selectedVertexIndex !== null) deleteSelectedVertex();
+        else item ? deleteSelected() : deleteSelectedZone();
+        return;
       }
       if (item && event.key.toLowerCase() === "r") {
         event.preventDefault(); rotateSelected(); return;
@@ -980,12 +1305,21 @@
       const movement = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
       if (movement) {
         event.preventDefault();
-        const subject = item || zone;
         pushHistory();
         const amount = event.shiftKey ? 10 : 1;
-        subject.x += movement[0] * amount;
-        subject.y += movement[1] * amount;
-        item ? keepInside(subject) : keepZoneInside(subject);
+        if (zone && shapeEditId === zone.id && selectedVertexIndex !== null) {
+          const points = getZoneAbsolutePoints(zone);
+          const point = points[selectedVertexIndex];
+          point.x = clamp(point.x + movement[0] * amount, 0, state.room.width);
+          point.y = clamp(point.y + movement[1] * amount, 0, state.room.depth);
+          zone.points = points.map(candidate => ({ x: candidate.x - zone.x, y: candidate.y - zone.y }));
+          normalizeZonePoints(zone);
+        } else {
+          const subject = item || zone;
+          subject.x += movement[0] * amount;
+          subject.y += movement[1] * amount;
+          item ? keepInside(subject) : keepZoneInside(subject);
+        }
         renderPlan();
         renderInspector();
         scheduleSave();

@@ -139,6 +139,10 @@ input:focus, textarea:focus { border-color: var(--accent); outline: none; }
 .section-help { margin: 10px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .form-select { width: 100%; height: 39px; padding: 0 9px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: var(--surface); }
 .inspector-single-action { margin-top: 17px; font-size: 11px; }
+.shape-edit-tools { margin-top: 12px; padding: 10px; border-radius: 9px; background: var(--accent-soft); }
+.shape-edit-tools p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.shape-edit-tools .inspector-actions { margin-top: 9px; }
+.shape-edit-tools button:disabled { opacity: .45; cursor: default; }
 
 .furniture-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
 .furniture-button {
@@ -215,6 +219,17 @@ textarea::placeholder { color: #aaa99f; }
 .furniture-item[data-kind="structure"] .furniture-shape { fill: #c9cbc6; stroke: #676b64; }
 .furniture-item.is-selected .furniture-shape { stroke: var(--accent); stroke-width: 3; }
 .selection-halo { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; pointer-events: none; }
+.zone-control-layer { color: var(--accent); }
+.zone-bounds { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; pointer-events: none; }
+.resize-handle { fill: var(--surface); stroke: currentColor; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.resize-handle[data-handle="n"], .resize-handle[data-handle="s"] { cursor: ns-resize; }
+.resize-handle[data-handle="e"], .resize-handle[data-handle="w"] { cursor: ew-resize; }
+.resize-handle[data-handle="ne"], .resize-handle[data-handle="sw"] { cursor: nesw-resize; }
+.resize-handle[data-handle="nw"], .resize-handle[data-handle="se"] { cursor: nwse-resize; }
+.vertex-handle { fill: var(--accent); stroke: var(--surface); stroke-width: 2; vector-effect: non-scaling-stroke; cursor: move; }
+.vertex-handle.is-active { fill: var(--ink); }
+.edge-handle { fill: var(--surface); stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; cursor: copy; }
+.edge-plus { fill: var(--accent); font-family: sans-serif; font-weight: 800; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
 .item-label { fill: #332f28; font-family: var(--font); font-size: 13px; font-weight: 800; text-anchor: middle; pointer-events: none; }
 .item-dim { fill: #665e50; font-family: var(--font); font-size: 9px; font-weight: 600; text-anchor: middle; pointer-events: none; }
 .item-symbol { fill: none; stroke: #7f715b; stroke-width: 1.2; vector-effect: non-scaling-stroke; pointer-events: none; opacity: .8; }
