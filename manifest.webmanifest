@@ -1,0 +1,13 @@
+{
+  "name": "방그림 — 자취방 가구 배치",
+  "short_name": "방그림",
+  "description": "빈 방의 치수를 기록하고 가구 배치를 미리 시험하는 오프라인 평면도 도구",
+  "lang": "ko-KR",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f4f1ea",
+  "theme_color": "#f6f3ed",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f6f3ed">
+  <meta name="description" content="빈 방의 치수를 기록하고 가구 배치를 미리 시험하는 오프라인 평면도 도구">
+  <title>방그림 — 자취방 가구 배치</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><path d="M5 27V10l11-6 11 6v17H5Z"/><path d="M12 27v-8h8v8M10 13h4v4h-4zM18 13h4v4h-4z"/></svg>
+      </span>
+      <div>
+        <h1>방그림</h1>
+        <p>치수만 재면, 배치는 여기서</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <span id="saveState" class="save-state" aria-live="polite">자동 저장됨</span>
+      <button id="undoBtn" class="icon-btn" type="button" aria-label="실행 취소" title="실행 취소 (Ctrl+Z)">
+        <svg viewBox="0 0 24 24"><path d="M9 7 4 12l5 5M5 12h9a5 5 0 0 1 5 5"/></svg>
+      </button>
+      <button id="redoBtn" class="icon-btn" type="button" aria-label="다시 실행" title="다시 실행 (Ctrl+Shift+Z)">
+        <svg viewBox="0 0 24 24"><path d="m15 7 5 5-5 5m4-5h-9a5 5 0 0 0-5 5"/></svg>
+      </button>
+      <button id="exportMenuBtn" class="secondary-btn" type="button">내보내기</button>
+    </div>
+  </header>
+
+  <main class="app-shell">
+    <aside class="left-panel" aria-label="방과 가구 설정">
+      <section class="panel-section room-settings">
+        <div class="section-heading">
+          <div>
+            <span class="step-number">1</span>
+            <h2>방 크기</h2>
+          </div>
+          <span class="unit-hint">cm 기준</span>
+        </div>
+        <div class="room-fields">
+          <label>
+            <span>가로</span>
+            <div class="input-with-unit"><input id="roomWidth" type="number" min="100" max="2000" step="10" inputmode="numeric"><span>cm</span></div>
+          </label>
+          <span class="multiply" aria-hidden="true">×</span>
+          <label>
+            <span>세로</span>
+            <div class="input-with-unit"><input id="roomDepth" type="number" min="100" max="2000" step="10" inputmode="numeric"><span>cm</span></div>
+          </label>
+        </div>
+        <button id="applyRoomBtn" class="primary-btn full-width" type="button">방 크기 적용</button>
+      </section>
+
+      <section class="panel-section furniture-library">
+        <div class="section-heading">
+          <div>
+            <span class="step-number">2</span>
+            <h2>가구 추가</h2>
+          </div>
+          <span class="unit-hint">눌러서 추가</span>
+        </div>
+        <div id="furnitureGrid" class="furniture-grid"></div>
+        <button id="customFurnitureBtn" class="secondary-btn full-width custom-btn" type="button">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          직접 입력해서 추가
+        </button>
+      </section>
+
+      <section class="panel-section field-notes">
+        <label for="roomNotes" class="section-heading simple-heading">
+          <span>
+            <svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/></svg>
+            현장 메모
+          </span>
+        </label>
+        <textarea id="roomNotes" rows="4" placeholder="예: 콘센트는 창문 오른쪽 40cm, 보일러 조절기 높이 120cm"></textarea>
+      </section>
+    </aside>
+
+    <section class="workspace" aria-label="평면도 작업 공간">
+      <div class="workspace-toolbar">
+        <div class="document-title">
+          <input id="roomName" type="text" maxlength="40" aria-label="도면 이름" value="나의 자취방">
+          <span id="roomSummary">360 × 320 cm</span>
+        </div>
+        <div class="view-options">
+          <label class="toggle-control"><input id="gridToggle" type="checkbox" checked><span>격자</span></label>
+          <label class="toggle-control"><input id="snapToggle" type="checkbox" checked><span>격자 맞춤</span></label>
+          <button id="resetViewBtn" class="text-btn" type="button">선택 해제</button>
+        </div>
+      </div>
+
+      <div id="canvasFrame" class="canvas-frame">
+        <svg id="floorPlan" role="img" aria-labelledby="planTitle planDesc" preserveAspectRatio="xMidYMid meet">
+          <title id="planTitle">자취방 평면도</title>
+          <desc id="planDesc">방과 배치한 가구를 위에서 본 평면도입니다. 가구를 드래그해 이동할 수 있습니다.</desc>
+        </svg>
+        <div id="emptyHint" class="empty-hint" hidden>
+          <strong>가구를 하나 추가해 보세요</strong>
+          <span>왼쪽 목록을 누르면 방 가운데에 놓여요.</span>
+        </div>
+        <div class="scale-guide" aria-hidden="true"><span></span><b>1 m</b></div>
+      </div>
+
+      <div class="mobile-add-bar" aria-label="빠른 가구 추가">
+        <span>빠른 추가</span>
+        <div id="mobileFurnitureList"></div>
+      </div>
+
+      <p class="workspace-tip">
+        <svg viewBox="0 0 24 24"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20ZM12 7v6M12 17h.01"/></svg>
+        가구를 누른 뒤 드래그하세요. 방향키로 1cm씩 미세 조정할 수도 있어요.
+      </p>
+    </section>
+
+    <aside class="right-panel" aria-label="선택한 가구 속성">
+      <section id="nothingSelected" class="selection-empty">
+        <div class="selection-illustration" aria-hidden="true">
+          <svg viewBox="0 0 120 92"><rect x="15" y="12" width="90" height="68" rx="2"/><rect x="28" y="25" width="34" height="24" rx="2"/><rect x="71" y="24" width="20" height="42" rx="2"/><path d="M28 60h34M45 49v11"/><circle cx="91" cy="74" r="8"/></svg>
+        </div>
+        <h2>가구를 선택해 주세요</h2>
+        <p>크기와 위치를 정확히 바꾸거나<br>회전·복제할 수 있어요.</p>
+      </section>
+
+      <section id="itemInspector" class="item-inspector" hidden>
+        <div class="inspector-heading">
+          <div>
+            <span class="eyebrow">선택한 가구</span>
+            <input id="itemName" type="text" maxlength="24" aria-label="가구 이름">
+          </div>
+          <button id="deleteItemBtn" class="danger-icon-btn" type="button" aria-label="가구 삭제" title="삭제">
+            <svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>
+          </button>
+        </div>
+
+        <div class="inspector-group">
+          <h3>가구 크기</h3>
+          <div class="two-column-fields">
+            <label><span>가로</span><div class="input-with-unit"><input id="itemWidth" type="number" min="10" max="1000" step="1" inputmode="numeric"><span>cm</span></div></label>
+            <label><span>세로</span><div class="input-with-unit"><input id="itemDepth" type="number" min="10" max="1000" step="1" inputmode="numeric"><span>cm</span></div></label>
+          </div>
+        </div>
+
+        <div class="inspector-group">
+          <h3>벽에서 거리</h3>
+          <div class="two-column-fields">
+            <label><span>왼쪽 벽</span><div class="input-with-unit"><input id="itemX" type="number" min="0" step="1" inputmode="numeric"><span>cm</span></div></label>
+            <label><span>위쪽 벽</span><div class="input-with-unit"><input id="itemY" type="number" min="0" step="1" inputmode="numeric"><span>cm</span></div></label>
+          </div>
+        </div>
+
+        <div class="inspector-actions">
+          <button id="rotateItemBtn" class="secondary-btn" type="button">
+            <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>
+            90° 회전
+          </button>
+          <button id="duplicateItemBtn" class="secondary-btn" type="button">
+            <svg viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="1"/><path d="M16 8V5H5v11h3"/></svg>
+            복제
+          </button>
+        </div>
+
+        <div class="fit-status" id="fitStatus">
+          <span class="status-dot"></span>
+          <span>방 안에 잘 배치되어 있어요</span>
+        </div>
+      </section>
+
+      <section class="visit-checklist">
+        <h2>방문할 때 이것도 재보세요</h2>
+        <label><input type="checkbox" data-check="ceiling"><span>천장 높이</span></label>
+        <label><input type="checkbox" data-check="door"><span>문 폭과 열리는 방향</span></label>
+        <label><input type="checkbox" data-check="window"><span>창문 크기와 바닥 높이</span></label>
+        <label><input type="checkbox" data-check="outlet"><span>콘센트·랜선 위치</span></label>
+        <label><input type="checkbox" data-check="appliance"><span>냉장고·세탁기 공간</span></label>
+      </section>
+    </aside>
+  </main>
+
+  <dialog id="customDialog">
+    <form id="customForm" method="dialog">
+      <div class="dialog-heading">
+        <div><span class="eyebrow">새 항목</span><h2>직접 크기 입력</h2></div>
+        <button class="icon-btn" value="cancel" type="submit" aria-label="닫기">
+          <svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+      <label class="dialog-label"><span>이름</span><input id="customName" type="text" value="새 가구" maxlength="24" required></label>
+      <div class="two-column-fields">
+        <label><span>가로</span><div class="input-with-unit"><input id="customWidth" type="number" value="100" min="10" max="1000" required><span>cm</span></div></label>
+        <label><span>세로</span><div class="input-with-unit"><input id="customDepth" type="number" value="60" min="10" max="1000" required><span>cm</span></div></label>
+      </div>
+      <div class="dialog-actions">
+        <button class="secondary-btn" value="cancel" type="submit">취소</button>
+        <button id="confirmCustomBtn" class="primary-btn" value="default" type="submit">도면에 추가</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="exportDialog">
+    <div class="dialog-heading">
+      <div><span class="eyebrow">저장 및 공유</span><h2>도면 내보내기</h2></div>
+      <button id="closeExportBtn" class="icon-btn" type="button" aria-label="닫기">
+        <svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="export-options">
+      <button id="exportPngBtn" class="export-option" type="button">
+        <span class="export-icon"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM8 13l2-2 3 3 2-2 3 3M9 9h.01"/></svg></span>
+        <span><strong>이미지로 저장</strong><small>가족이나 친구에게 공유하기 좋은 PNG</small></span>
+      </button>
+      <button id="exportJsonBtn" class="export-option" type="button">
+        <span class="export-icon"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg></span>
+        <span><strong>도면 파일 저장</strong><small>나중에 다시 불러올 수 있는 JSON</small></span>
+      </button>
+      <label class="export-option file-option">
+        <input id="importJsonInput" type="file" accept="application/json,.json">
+        <span class="export-icon"><svg viewBox="0 0 24 24"><path d="M12 21V9M7 14l5-5 5 5M5 3h14"/></svg></span>
+        <span><strong>도면 파일 불러오기</strong><small>이전에 저장한 작업 이어서 편집</small></span>
+      </label>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>
