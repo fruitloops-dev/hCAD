@@ -21,8 +21,18 @@
     { type: "column", name: "기둥", width: 40, depth: 40, kind: "structure", icon: "<rect x='5' y='5' width='14' height='14'/><path d='m5 5 14 14M19 5 5 19'/>" }
   ];
 
+  const zonePresets = [
+    { type: "living", name: "방·거실", width: 260, depth: 260 },
+    { type: "bathroom", name: "화장실", width: 140, depth: 180 },
+    { type: "kitchen", name: "주방", width: 180, depth: 120 },
+    { type: "entry", name: "현관", width: 100, depth: 140 },
+    { type: "balcony", name: "발코니", width: 180, depth: 90 },
+    { type: "custom", name: "기타 공간", width: 160, depth: 160 }
+  ];
+
   const initialState = {
     room: { name: "나의 자취방", width: 360, depth: 320, grid: 20, notes: "" },
+    zones: [{ id: "zone-main", type: "living", name: "방·거실", x: 0, y: 0, width: 360, depth: 320 }],
     items: [],
     selectedId: null,
     snap: true,
@@ -40,9 +50,11 @@
   const el = {};
   const ids = [
     "saveState", "undoBtn", "redoBtn", "exportMenuBtn", "roomWidth", "roomDepth", "applyRoomBtn",
-    "furnitureGrid", "customFurnitureBtn", "roomNotes", "roomName", "roomSummary", "gridToggle", "snapToggle",
-    "resetViewBtn", "canvasFrame", "floorPlan", "emptyHint", "mobileFurnitureList", "nothingSelected",
+    "zoneGrid", "furnitureGrid", "customFurnitureBtn", "roomNotes", "roomName", "roomSummary", "gridToggle", "snapToggle",
+    "resetViewBtn", "canvasFrame", "floorPlan", "emptyHint", "mobileZoneList", "mobileFurnitureList", "nothingSelected",
     "itemInspector", "itemName", "itemWidth", "itemDepth", "itemX", "itemY", "deleteItemBtn", "rotateItemBtn",
+    "zoneInspector", "zoneName", "zoneType", "zoneWidth", "zoneDepth", "zoneX", "zoneY", "deleteZoneBtn",
+    "duplicateZoneBtn", "zoneFitStatus",
     "duplicateItemBtn", "fitStatus", "customDialog", "customForm", "customName", "customWidth", "customDepth",
     "confirmCustomBtn", "exportDialog", "closeExportBtn", "exportPngBtn", "exportJsonBtn", "importJsonInput", "toast"
   ];
@@ -74,6 +86,7 @@
     return JSON.stringify({
       room: state.room,
       items: state.items,
+      zones: state.zones,
       selectedId: state.selectedId,
       snap: state.snap,
       showGrid: state.showGrid,
@@ -139,8 +152,8 @@
     return Number.isFinite(parsed) ? clamp(parsed, min, max) : fallback;
   }
 
-  function uid() {
-    return `item-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  function uid(prefix = "item") {
+    return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
   }
 
   function getFootprint(item) {
@@ -153,10 +166,39 @@
     return state.items.find(item => item.id === state.selectedId) || null;
   }
 
+  function selectedZone() {
+    return state.zones.find(zone => zone.id === state.selectedId) || null;
+  }
+
   function keepInside(item) {
     const footprint = getFootprint(item);
     item.x = clamp(item.x, 0, Math.max(0, state.room.width - footprint.width));
     item.y = clamp(item.y, 0, Math.max(0, state.room.depth - footprint.depth));
+  }
+
+  function keepZoneInside(zone) {
+    zone.x = clamp(zone.x, 0, Math.max(0, state.room.width - zone.width));
+    zone.y = clamp(zone.y, 0, Math.max(0, state.room.depth - zone.depth));
+  }
+
+  function isPointInsideAnyZone(x, y) {
+    return state.zones.some(zone => x >= zone.x && x <= zone.x + zone.width && y >= zone.y && y <= zone.y + zone.depth);
+  }
+
+  function isRectCoveredByZones(rect) {
+    if (!state.zones.length) return false;
+    const right = rect.x + rect.width;
+    const bottom = rect.y + rect.depth;
+    const xs = [rect.x, right, ...state.zones.flatMap(zone => [zone.x, zone.x + zone.width]).filter(x => x > rect.x && x < right)].sort((a, b) => a - b);
+    const ys = [rect.y, bottom, ...state.zones.flatMap(zone => [zone.y, zone.y + zone.depth]).filter(y => y > rect.y && y < bottom)].sort((a, b) => a - b);
+    for (let xi = 0; xi < xs.length - 1; xi += 1) {
+      for (let yi = 0; yi < ys.length - 1; yi += 1) {
+        const middleX = (xs[xi] + xs[xi + 1]) / 2;
+        const middleY = (ys[yi] + ys[yi + 1]) / 2;
+        if (!isPointInsideAnyZone(middleX, middleY)) return false;
+      }
+    }
+    return true;
   }
 
   function addItem(preset) {
@@ -232,7 +274,82 @@
     scheduleSave();
   }
 
+  function addZone(preset) {
+    pushHistory();
+    const zone = {
+      id: uid("zone"),
+      type: preset.type || "custom",
+      name: preset.name || "새 구역",
+      x: 0,
+      y: 0,
+      width: number(preset.width, 160, 20, ROOM_MAX),
+      depth: number(preset.depth, 160, 20, ROOM_MAX)
+    };
+    const offset = (state.zones.length % 5) * state.room.grid;
+    zone.x = clamp((state.room.width - zone.width) / 2 + offset, 0, state.room.width - zone.width);
+    zone.y = clamp((state.room.depth - zone.depth) / 2 + offset, 0, state.room.depth - zone.depth);
+    if (state.snap) {
+      zone.x = Math.round(zone.x / state.room.grid) * state.room.grid;
+      zone.y = Math.round(zone.y / state.room.grid) * state.room.grid;
+    }
+    keepZoneInside(zone);
+    state.zones.push(zone);
+    state.selectedId = zone.id;
+    renderAll();
+    scheduleSave();
+    showToast(`${zone.name} 구역을 추가했어요`);
+  }
+
+  function deleteSelectedZone() {
+    const zone = selectedZone();
+    if (!zone) return;
+    pushHistory();
+    state.zones = state.zones.filter(candidate => candidate.id !== zone.id);
+    state.selectedId = null;
+    renderAll();
+    scheduleSave();
+    showToast(`${zone.name} 구역을 삭제했어요`);
+  }
+
+  function duplicateSelectedZone() {
+    const original = selectedZone();
+    if (!original) return;
+    pushHistory();
+    const copy = {
+      ...original,
+      id: uid("zone"),
+      name: `${original.name} 복사본`,
+      x: original.x + state.room.grid,
+      y: original.y + state.room.grid
+    };
+    keepZoneInside(copy);
+    state.zones.push(copy);
+    state.selectedId = copy.id;
+    renderAll();
+    scheduleSave();
+    showToast("구역을 복제했어요");
+  }
+
   function renderFurnitureLibrary() {
+    el.zoneGrid.innerHTML = "";
+    el.mobileZoneList.innerHTML = "";
+    zonePresets.forEach(preset => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "zone-button";
+      button.dataset.type = preset.type;
+      button.setAttribute("aria-label", `${preset.name} 구역 ${preset.width} × ${preset.depth}cm 추가`);
+      button.innerHTML = `<span class="zone-swatch" aria-hidden="true"></span><span>${preset.name}</span>`;
+      button.addEventListener("click", () => addZone(preset));
+      el.zoneGrid.appendChild(button);
+
+      const mobile = document.createElement("button");
+      mobile.type = "button";
+      mobile.className = "mobile-furniture-btn";
+      mobile.textContent = `+ ${preset.name}`;
+      mobile.addEventListener("click", () => addZone(preset));
+      el.mobileZoneList.appendChild(mobile);
+    });
     el.furnitureGrid.innerHTML = "";
     el.mobileFurnitureList.innerHTML = "";
     presets.forEach(preset => {
@@ -275,7 +392,7 @@
     const title = svgNode("title", { id: "planTitle" });
     title.textContent = `${room.name}, 가로 ${room.width}cm 세로 ${room.depth}cm 평면도`;
     const desc = svgNode("desc", { id: "planDesc" });
-    desc.textContent = `가구 ${state.items.length}개가 배치되어 있습니다. 가구를 누르고 드래그해 이동할 수 있습니다.`;
+    desc.textContent = `구역 ${state.zones.length}개와 가구 ${state.items.length}개가 배치되어 있습니다. 구역과 가구를 누르고 드래그해 이동할 수 있습니다.`;
     el.floorPlan.append(title, desc);
 
     const defs = svgNode("defs");
@@ -286,6 +403,40 @@
 
     el.floorPlan.appendChild(svgNode("rect", { x: 0, y: 0, width: room.width, height: room.depth, rx: 2, class: "room-floor" }));
     if (state.showGrid) el.floorPlan.appendChild(svgNode("rect", { x: 0, y: 0, width: room.width, height: room.depth, class: "grid-fill", "pointer-events": "none" }));
+
+    state.zones.forEach(zone => {
+      const group = svgNode("g", {
+        class: `zone-item${zone.id === state.selectedId ? " is-selected" : ""}`,
+        "data-id": zone.id,
+        "data-type": zone.type,
+        role: "button",
+        "aria-label": `${zone.name} 구역, ${zone.width} × ${zone.depth}cm, 왼쪽 ${Math.round(zone.x)}cm, 위쪽 ${Math.round(zone.y)}cm`
+      });
+      if (zone.id === state.selectedId) {
+        group.appendChild(svgNode("rect", { x: zone.x - 6, y: zone.y - 6, width: zone.width + 12, height: zone.depth + 12, rx: 4, class: "selection-halo" }));
+      }
+      group.appendChild(svgNode("rect", { x: zone.x, y: zone.y, width: zone.width, height: zone.depth, rx: 1, class: "zone-shape" }));
+      if (state.showGrid) group.appendChild(svgNode("rect", { x: zone.x, y: zone.y, width: zone.width, height: zone.depth, class: "grid-fill", "pointer-events": "none" }));
+
+      const minDimension = Math.min(zone.width, zone.depth);
+      if (minDimension >= 55) {
+        const label = svgNode("text", { x: zone.x + zone.width / 2, y: zone.y + zone.depth / 2 - 5, class: "zone-label" });
+        label.textContent = compactName(zone.name, zone.width);
+        group.appendChild(label);
+      }
+      if (minDimension >= 80) {
+        const dim = svgNode("text", { x: zone.x + zone.width / 2, y: zone.y + zone.depth / 2 + 14, class: "zone-dim" });
+        dim.textContent = `${zone.width}×${zone.depth}`;
+        group.appendChild(dim);
+      }
+
+      group.addEventListener("pointerdown", startZoneDrag);
+      group.addEventListener("click", event => {
+        event.stopPropagation();
+        selectZone(zone.id);
+      });
+      el.floorPlan.appendChild(group);
+    });
 
     const widthLabel = svgNode("text", { x: room.width / 2, y: -16, class: "wall-label" });
     widthLabel.textContent = `${room.width} cm`;
@@ -330,7 +481,7 @@
       el.floorPlan.appendChild(group);
     });
 
-    el.emptyHint.hidden = state.items.length !== 0;
+    el.emptyHint.hidden = state.zones.length !== 0;
   }
 
   function compactName(name, availableWidth) {
@@ -358,27 +509,43 @@
 
   function renderInspector() {
     const item = selectedItem();
-    el.nothingSelected.hidden = Boolean(item);
+    const zone = selectedZone();
+    el.nothingSelected.hidden = Boolean(item || zone);
     el.itemInspector.hidden = !item;
-    if (!item) return;
-    el.itemName.value = item.name;
-    el.itemWidth.value = Math.round(item.width);
-    el.itemDepth.value = Math.round(item.depth);
-    el.itemX.value = Math.round(item.x);
-    el.itemY.value = Math.round(item.y);
-    const fp = getFootprint(item);
-    el.itemX.max = Math.max(0, state.room.width - fp.width);
-    el.itemY.max = Math.max(0, state.room.depth - fp.depth);
-    const fits = fp.width <= state.room.width && fp.depth <= state.room.depth;
-    el.fitStatus.classList.toggle("invalid", !fits);
-    el.fitStatus.querySelector("span:last-child").textContent = fits ? "방 안에 잘 배치되어 있어요" : "가구가 방보다 커서 일부가 넘쳐요";
+    el.zoneInspector.hidden = !zone;
+    if (item) {
+      el.itemName.value = item.name;
+      el.itemWidth.value = Math.round(item.width);
+      el.itemDepth.value = Math.round(item.depth);
+      el.itemX.value = Math.round(item.x);
+      el.itemY.value = Math.round(item.y);
+      const fp = getFootprint(item);
+      el.itemX.max = Math.max(0, state.room.width - fp.width);
+      el.itemY.max = Math.max(0, state.room.depth - fp.depth);
+      const fits = isRectCoveredByZones({ x: item.x, y: item.y, width: fp.width, depth: fp.depth });
+      el.fitStatus.classList.toggle("invalid", !fits);
+      el.fitStatus.querySelector("span:last-child").textContent = fits ? "실제 구역 안에 잘 배치되어 있어요" : "가구 일부가 구역 밖으로 나갔어요";
+    }
+    if (zone) {
+      el.zoneName.value = zone.name;
+      el.zoneType.value = zone.type;
+      el.zoneWidth.value = Math.round(zone.width);
+      el.zoneDepth.value = Math.round(zone.depth);
+      el.zoneX.value = Math.round(zone.x);
+      el.zoneY.value = Math.round(zone.y);
+      el.zoneX.max = Math.max(0, state.room.width - zone.width);
+      el.zoneY.max = Math.max(0, state.room.depth - zone.depth);
+      const fits = zone.width <= state.room.width && zone.depth <= state.room.depth;
+      el.zoneFitStatus.classList.toggle("invalid", !fits);
+      el.zoneFitStatus.querySelector("span:last-child").textContent = fits ? "전체 도면 안에 들어와 있어요" : "구역이 전체 도면보다 커요";
+    }
   }
 
   function renderControls() {
     el.roomWidth.value = state.room.width;
     el.roomDepth.value = state.room.depth;
     el.roomName.value = state.room.name;
-    el.roomSummary.textContent = `${state.room.width} × ${state.room.depth} cm · 가구 ${state.items.length}개`;
+    el.roomSummary.textContent = `${state.room.width} × ${state.room.depth} cm · 구역 ${state.zones.length}개 · 가구 ${state.items.length}개`;
     el.roomNotes.value = state.room.notes || "";
     el.gridToggle.checked = state.showGrid;
     el.snapToggle.checked = state.snap;
@@ -395,6 +562,12 @@
   }
 
   function selectItem(id) {
+    if (state.selectedId !== id) state.selectedId = id;
+    renderPlan();
+    renderInspector();
+  }
+
+  function selectZone(id) {
     if (state.selectedId !== id) state.selectedId = id;
     renderPlan();
     renderInspector();
@@ -421,7 +594,27 @@
     }
     pushHistory();
     const point = svgPoint(event);
-    drag = { id, pointerId: event.pointerId, offsetX: point.x - item.x, offsetY: point.y - item.y, moved: false };
+    drag = { kind: "item", id, pointerId: event.pointerId, offsetX: point.x - item.x, offsetY: point.y - item.y, moved: false };
+    el.floorPlan.setPointerCapture?.(event.pointerId);
+    el.floorPlan.addEventListener("pointermove", moveDrag);
+    el.floorPlan.addEventListener("pointerup", endDrag);
+    el.floorPlan.addEventListener("pointercancel", endDrag);
+  }
+
+  function startZoneDrag(event) {
+    if (event.button !== undefined && event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const id = event.currentTarget.dataset.id;
+    const zone = state.zones.find(candidate => candidate.id === id);
+    if (!zone) return;
+    if (state.selectedId !== id) {
+      state.selectedId = id;
+      renderInspector();
+    }
+    pushHistory();
+    const point = svgPoint(event);
+    drag = { kind: "zone", id, pointerId: event.pointerId, offsetX: point.x - zone.x, offsetY: point.y - zone.y, moved: false };
     el.floorPlan.setPointerCapture?.(event.pointerId);
     el.floorPlan.addEventListener("pointermove", moveDrag);
     el.floorPlan.addEventListener("pointerup", endDrag);
@@ -430,8 +623,8 @@
 
   function moveDrag(event) {
     if (!drag || event.pointerId !== drag.pointerId) return;
-    const item = state.items.find(candidate => candidate.id === drag.id);
-    if (!item) return;
+    const subject = drag.kind === "zone" ? state.zones.find(candidate => candidate.id === drag.id) : state.items.find(candidate => candidate.id === drag.id);
+    if (!subject) return;
     const point = svgPoint(event);
     let x = point.x - drag.offsetX;
     let y = point.y - drag.offsetY;
@@ -439,10 +632,10 @@
       x = Math.round(x / state.room.grid) * state.room.grid;
       y = Math.round(y / state.room.grid) * state.room.grid;
     }
-    if (Math.abs(x - item.x) > .1 || Math.abs(y - item.y) > .1) drag.moved = true;
-    item.x = x;
-    item.y = y;
-    keepInside(item);
+    if (Math.abs(x - subject.x) > .1 || Math.abs(y - subject.y) > .1) drag.moved = true;
+    subject.x = x;
+    subject.y = y;
+    drag.kind === "zone" ? keepZoneInside(subject) : keepInside(subject);
     renderPlan();
     renderInspector();
   }
@@ -474,6 +667,7 @@
     pushHistory();
     state.room.width = Math.round(width);
     state.room.depth = Math.round(depth);
+    state.zones.forEach(keepZoneInside);
     state.items.forEach(keepInside);
     renderAll();
     scheduleSave();
@@ -492,6 +686,23 @@
     pushHistory();
     item[field] = value;
     keepInside(item);
+    renderAll();
+    scheduleSave();
+  }
+
+  function changeZoneField(field, rawValue) {
+    const zone = selectedZone();
+    if (!zone) return;
+    const oldValue = zone[field];
+    let value;
+    if (field === "name") value = String(rawValue).trim().slice(0, 24) || zone.name;
+    else if (field === "type") value = zonePresets.some(preset => preset.type === rawValue) ? rawValue : "custom";
+    else if (field === "width" || field === "depth") value = number(rawValue, oldValue, 20, ROOM_MAX);
+    else value = number(rawValue, oldValue, 0, ROOM_MAX);
+    if (value === oldValue) return;
+    pushHistory();
+    zone[field] = value;
+    keepZoneInside(zone);
     renderAll();
     scheduleSave();
   }
@@ -530,7 +741,7 @@
   function exportJson() {
     const data = {
       app: "방그림",
-      version: 1,
+      version: 2,
       exportedAt: new Date().toISOString(),
       ...JSON.parse(snapshot()),
       selectedId: null
@@ -562,6 +773,19 @@
     const oy = margin + 40;
     ctx.fillStyle = "#f7f4ed";
     ctx.fillRect(ox, oy, room.width * scale, room.depth * scale);
+    const zoneColors = { living: "#edc57e", bathroom: "#b9cde6", kitchen: "#c9dfcb", entry: "#d7d4ce", balcony: "#c9dce2", custom: "#dfd1bc" };
+    state.zones.forEach(zone => {
+      const x = ox + zone.x * scale;
+      const y = oy + zone.y * scale;
+      const w = zone.width * scale;
+      const h = zone.depth * scale;
+      ctx.fillStyle = zoneColors[zone.type] || zoneColors.custom;
+      ctx.strokeStyle = "#3c4037";
+      ctx.lineWidth = 6;
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeRect(x, y, w, h);
+    });
+
     if (state.showGrid) {
       ctx.strokeStyle = "#ddd8cd";
       ctx.lineWidth = 1;
@@ -573,11 +797,25 @@
       }
     }
     ctx.strokeStyle = "#3c4037";
-    ctx.lineWidth = 6;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 8]);
     ctx.strokeRect(ox, oy, room.width * scale, room.depth * scale);
+    ctx.setLineDash([]);
 
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
+    state.zones.forEach(zone => {
+      const x = ox + zone.x * scale;
+      const y = oy + zone.y * scale;
+      const w = zone.width * scale;
+      const h = zone.depth * scale;
+      if (Math.min(w, h) > 54) {
+        ctx.fillStyle = "#332f28";
+        ctx.font = `700 ${Math.max(14, Math.min(24, Math.min(w, h) * .13))}px sans-serif`;
+        ctx.fillText(`${zone.name} · ${zone.width}×${zone.depth}`, x + w / 2, y + h / 2);
+      }
+    });
+
     state.items.forEach(item => {
       const fp = getFootprint(item);
       const x = ox + item.x * scale;
@@ -620,6 +858,16 @@
           ...structuredClone(initialState),
           ...imported,
           room: { ...initialState.room, ...imported.room },
+          zones: (Array.isArray(imported.zones) ? imported.zones : [{ ...initialState.zones[0], width: Number(imported.room.width) || 360, depth: Number(imported.room.depth) || 320 }]).map(zone => ({
+            ...zone,
+            id: String(zone.id || uid("zone")),
+            type: zonePresets.some(preset => preset.type === zone.type) ? zone.type : "custom",
+            name: String(zone.name || "기타 공간").slice(0, 24),
+            width: number(zone.width, 160, 20, ROOM_MAX),
+            depth: number(zone.depth, 160, 20, ROOM_MAX),
+            x: number(zone.x, 0, 0, ROOM_MAX),
+            y: number(zone.y, 0, 0, ROOM_MAX)
+          })),
           items: imported.items.map(item => ({
             ...item,
             id: String(item.id || uid()),
@@ -634,6 +882,7 @@
         };
         state.room.width = number(state.room.width, 360, ROOM_MIN, ROOM_MAX);
         state.room.depth = number(state.room.depth, 320, ROOM_MIN, ROOM_MAX);
+        state.zones.forEach(keepZoneInside);
         state.items.forEach(keepInside);
         el.exportDialog.close();
         renderAll();
@@ -687,6 +936,14 @@
     el.deleteItemBtn.addEventListener("click", deleteSelected);
     el.rotateItemBtn.addEventListener("click", rotateSelected);
     el.duplicateItemBtn.addEventListener("click", duplicateSelected);
+    el.zoneName.addEventListener("change", () => changeZoneField("name", el.zoneName.value));
+    el.zoneType.addEventListener("change", () => changeZoneField("type", el.zoneType.value));
+    el.zoneWidth.addEventListener("change", () => changeZoneField("width", el.zoneWidth.value));
+    el.zoneDepth.addEventListener("change", () => changeZoneField("depth", el.zoneDepth.value));
+    el.zoneX.addEventListener("change", () => changeZoneField("x", el.zoneX.value));
+    el.zoneY.addEventListener("change", () => changeZoneField("y", el.zoneY.value));
+    el.deleteZoneBtn.addEventListener("click", deleteSelectedZone);
+    el.duplicateZoneBtn.addEventListener("click", duplicateSelectedZone);
     el.undoBtn.addEventListener("click", undo);
     el.redoBtn.addEventListener("click", redo);
 
@@ -702,7 +959,7 @@
     el.importJsonInput.addEventListener("change", () => importJson(el.importJsonInput.files?.[0]));
 
     document.addEventListener("keydown", event => {
-      const typing = /INPUT|TEXTAREA/.test(document.activeElement?.tagName);
+      const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName);
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
         event.preventDefault();
         event.shiftKey ? redo() : undo();
@@ -711,22 +968,24 @@
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") {
         event.preventDefault(); redo(); return;
       }
-      if (typing || !selectedItem()) return;
+      const item = selectedItem();
+      const zone = selectedZone();
+      if (typing || (!item && !zone)) return;
       if (event.key === "Delete" || event.key === "Backspace") {
-        event.preventDefault(); deleteSelected(); return;
+        event.preventDefault(); item ? deleteSelected() : deleteSelectedZone(); return;
       }
-      if (event.key.toLowerCase() === "r") {
+      if (item && event.key.toLowerCase() === "r") {
         event.preventDefault(); rotateSelected(); return;
       }
       const movement = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
       if (movement) {
         event.preventDefault();
-        const item = selectedItem();
+        const subject = item || zone;
         pushHistory();
         const amount = event.shiftKey ? 10 : 1;
-        item.x += movement[0] * amount;
-        item.y += movement[1] * amount;
-        keepInside(item);
+        subject.x += movement[0] * amount;
+        subject.y += movement[1] * amount;
+        item ? keepInside(subject) : keepZoneInside(subject);
         renderPlan();
         renderInspector();
         scheduleSave();

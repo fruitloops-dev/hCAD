@@ -117,7 +117,7 @@ button svg, .simple-heading svg, .workspace-tip svg { width: 18px; height: 18px;
 .room-fields label > span, .two-column-fields label > span, .dialog-label > span { display: block; margin-bottom: 6px; color: var(--muted); font-size: 11px; font-weight: 700; }
 .multiply { padding-bottom: 12px; color: var(--muted); text-align: center; }
 .input-with-unit { position: relative; }
-.input-with-unit input, .dialog-label input, #itemName, #roomName, textarea {
+.input-with-unit input, .dialog-label input, #itemName, #zoneName, #roomName, textarea {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -127,6 +127,18 @@ button svg, .simple-heading svg, .workspace-tip svg { width: 18px; height: 18px;
 .input-with-unit input { height: 39px; padding: 0 31px 0 10px; font-weight: 700; }
 .input-with-unit span { position: absolute; top: 50%; right: 9px; transform: translateY(-50%); color: var(--muted); font-size: 10px; pointer-events: none; }
 input:focus, textarea:focus { border-color: var(--accent); outline: none; }
+
+.zone-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; }
+.zone-button { min-height: 42px; display: flex; align-items: center; gap: 7px; padding: 0 9px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 10px; font-weight: 700; cursor: pointer; }
+.zone-button:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.zone-swatch { width: 15px; height: 15px; flex: 0 0 auto; border: 1px solid rgba(60, 64, 55, .28); border-radius: 4px; background: #edc57e; }
+.zone-button[data-type="bathroom"] .zone-swatch { background: #b9cde6; }
+.zone-button[data-type="kitchen"] .zone-swatch { background: #c9dfcb; }
+.zone-button[data-type="entry"] .zone-swatch { background: #d7d4ce; }
+.zone-button[data-type="balcony"] .zone-swatch { background: #c9dce2; }
+.section-help { margin: 10px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.form-select { width: 100%; height: 39px; padding: 0 9px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: var(--surface); }
+.inspector-single-action { margin-top: 17px; font-size: 11px; }
 
 .furniture-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
 .furniture-button {
@@ -181,7 +193,18 @@ textarea::placeholder { color: #aaa99f; }
   touch-action: none;
 }
 #floorPlan { width: 100%; max-height: 64vh; min-height: 340px; overflow: visible; user-select: none; }
-.room-floor { fill: #f7f4ed; stroke: #3c4037; stroke-width: 5; vector-effect: non-scaling-stroke; }
+.room-floor { fill: #faf9f6; stroke: #c8c4ba; stroke-width: 1.5; stroke-dasharray: 5 5; vector-effect: non-scaling-stroke; }
+.zone-item { cursor: grab; }
+.zone-item:active { cursor: grabbing; }
+.zone-shape { fill: #edc57e; stroke: #3c4037; stroke-width: 5; vector-effect: non-scaling-stroke; }
+.zone-item[data-type="bathroom"] .zone-shape { fill: #b9cde6; }
+.zone-item[data-type="kitchen"] .zone-shape { fill: #c9dfcb; }
+.zone-item[data-type="entry"] .zone-shape { fill: #d7d4ce; }
+.zone-item[data-type="balcony"] .zone-shape { fill: #c9dce2; }
+.zone-item[data-type="custom"] .zone-shape { fill: #dfd1bc; }
+.zone-item.is-selected .zone-shape { stroke: var(--accent); stroke-width: 6; }
+.zone-label { fill: #332f28; font-family: var(--font); font-size: 16px; font-weight: 800; text-anchor: middle; pointer-events: none; }
+.zone-dim { fill: #665e50; font-family: var(--font); font-size: 10px; font-weight: 600; text-anchor: middle; pointer-events: none; }
 .grid-fill { fill: url(#roomGrid); }
 .grid-line { stroke: #d7d3ca; stroke-width: 1; vector-effect: non-scaling-stroke; }
 .wall-label { fill: #696c63; font-family: var(--font); font-size: 13px; font-weight: 700; text-anchor: middle; }
@@ -214,8 +237,8 @@ textarea::placeholder { color: #aaa99f; }
 .item-inspector { padding-bottom: 22px; border-bottom: 1px solid var(--line); }
 .inspector-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 19px; }
 .eyebrow { display: block; margin-bottom: 4px; color: var(--accent); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-#itemName { padding: 2px 0; border: 0; border-radius: 0; background: transparent; font-size: 18px; font-weight: 800; }
-#itemName:focus { box-shadow: 0 2px var(--accent); }
+#itemName, #zoneName { padding: 2px 0; border: 0; border-radius: 0; background: transparent; font-size: 18px; font-weight: 800; }
+#itemName:focus, #zoneName:focus { box-shadow: 0 2px var(--accent); }
 .inspector-group { margin-top: 17px; }
 .inspector-group h3 { margin: 0 0 10px; font-size: 12px; }
 .two-column-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
@@ -275,7 +298,7 @@ dialog::backdrop { background: rgba(35, 33, 28, .42); backdrop-filter: blur(3px)
   .app-shell { display: block; }
   .left-panel { border-right: 0; }
   .panel-section { padding: 16px; }
-  .furniture-library { display: none; }
+  .furniture-library, .zone-library { display: none; }
   .field-notes { border-bottom: 1px solid var(--line); }
   .workspace { padding: 14px 12px 10px; }
   .workspace-toolbar { align-items: flex-start; }
@@ -290,8 +313,8 @@ dialog::backdrop { background: rgba(35, 33, 28, .42); backdrop-filter: blur(3px)
   .scale-guide { right: 13px; bottom: 12px; }
   .mobile-add-bar { display: flex; align-items: center; gap: 10px; max-width: 900px; margin: 10px auto 0; }
   .mobile-add-bar > span { flex: 0 0 auto; color: var(--muted); font-size: 10px; font-weight: 700; }
-  #mobileFurnitureList { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
-  #mobileFurnitureList::-webkit-scrollbar { display: none; }
+  #mobileFurnitureList, #mobileZoneList { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+  #mobileFurnitureList::-webkit-scrollbar, #mobileZoneList::-webkit-scrollbar { display: none; }
   .mobile-furniture-btn { flex: 0 0 auto; min-height: 34px; padding: 0 11px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); font-size: 10px; font-weight: 700; }
   .workspace-tip { align-items: flex-start; text-align: center; line-height: 1.45; }
   .right-panel { display: block; padding: 18px 16px; }

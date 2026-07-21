@@ -57,10 +57,22 @@
         <button id="applyRoomBtn" class="primary-btn full-width" type="button">방 크기 적용</button>
       </section>
 
-      <section class="panel-section furniture-library">
+      <section class="panel-section zone-library">
         <div class="section-heading">
           <div>
             <span class="step-number">2</span>
+            <h2>구역 나누기</h2>
+          </div>
+          <span class="unit-hint">조합해서 모양 만들기</span>
+        </div>
+        <div id="zoneGrid" class="zone-grid"></div>
+        <p class="section-help">여러 구역을 이어 붙이면 L자형처럼 꺾인 공간도 만들 수 있어요.</p>
+      </section>
+
+      <section class="panel-section furniture-library">
+        <div class="section-heading">
+          <div>
+            <span class="step-number">3</span>
             <h2>가구 추가</h2>
           </div>
           <span class="unit-hint">눌러서 추가</span>
@@ -102,30 +114,34 @@
           <desc id="planDesc">방과 배치한 가구를 위에서 본 평면도입니다. 가구를 드래그해 이동할 수 있습니다.</desc>
         </svg>
         <div id="emptyHint" class="empty-hint" hidden>
-          <strong>가구를 하나 추가해 보세요</strong>
-          <span>왼쪽 목록을 누르면 방 가운데에 놓여요.</span>
+          <strong>구역을 하나 추가해 보세요</strong>
+          <span>구역들을 이어 붙여 실제 방 모양을 만들 수 있어요.</span>
         </div>
         <div class="scale-guide" aria-hidden="true"><span></span><b>1 m</b></div>
       </div>
 
       <div class="mobile-add-bar" aria-label="빠른 가구 추가">
-        <span>빠른 추가</span>
+        <span>구역</span>
+        <div id="mobileZoneList"></div>
+      </div>
+      <div class="mobile-add-bar" aria-label="빠른 가구 추가">
+        <span>가구</span>
         <div id="mobileFurnitureList"></div>
       </div>
 
       <p class="workspace-tip">
         <svg viewBox="0 0 24 24"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20ZM12 7v6M12 17h.01"/></svg>
-        가구를 누른 뒤 드래그하세요. 방향키로 1cm씩 미세 조정할 수도 있어요.
+        구역을 이어 붙여 방 모양을 만들고, 그 위에 가구를 배치하세요. 방향키로 1cm씩 조정할 수 있어요.
       </p>
     </section>
 
-    <aside class="right-panel" aria-label="선택한 가구 속성">
+    <aside class="right-panel" aria-label="선택한 구역 또는 가구 속성">
       <section id="nothingSelected" class="selection-empty">
         <div class="selection-illustration" aria-hidden="true">
           <svg viewBox="0 0 120 92"><rect x="15" y="12" width="90" height="68" rx="2"/><rect x="28" y="25" width="34" height="24" rx="2"/><rect x="71" y="24" width="20" height="42" rx="2"/><path d="M28 60h34M45 49v11"/><circle cx="91" cy="74" r="8"/></svg>
         </div>
-        <h2>가구를 선택해 주세요</h2>
-        <p>크기와 위치를 정확히 바꾸거나<br>회전·복제할 수 있어요.</p>
+        <h2>구역이나 가구를 선택해 주세요</h2>
+        <p>크기와 위치를 정확히 바꾸거나<br>드래그해 배치할 수 있어요.</p>
       </section>
 
       <section id="itemInspector" class="item-inspector" hidden>
@@ -169,6 +185,56 @@
         <div class="fit-status" id="fitStatus">
           <span class="status-dot"></span>
           <span>방 안에 잘 배치되어 있어요</span>
+        </div>
+      </section>
+
+      <section id="zoneInspector" class="item-inspector zone-inspector" hidden>
+        <div class="inspector-heading">
+          <div>
+            <span class="eyebrow">선택한 구역</span>
+            <input id="zoneName" type="text" maxlength="24" aria-label="구역 이름">
+          </div>
+          <button id="deleteZoneBtn" class="danger-icon-btn" type="button" aria-label="구역 삭제" title="삭제">
+            <svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>
+          </button>
+        </div>
+
+        <div class="inspector-group">
+          <label class="dialog-label" for="zoneType"><span>구역 종류</span></label>
+          <select id="zoneType" class="form-select">
+            <option value="living">방·거실</option>
+            <option value="bathroom">화장실</option>
+            <option value="kitchen">주방</option>
+            <option value="entry">현관</option>
+            <option value="balcony">발코니</option>
+            <option value="custom">기타 공간</option>
+          </select>
+        </div>
+
+        <div class="inspector-group">
+          <h3>구역 크기</h3>
+          <div class="two-column-fields">
+            <label><span>가로</span><div class="input-with-unit"><input id="zoneWidth" type="number" min="20" max="2000" step="1" inputmode="numeric"><span>cm</span></div></label>
+            <label><span>세로</span><div class="input-with-unit"><input id="zoneDepth" type="number" min="20" max="2000" step="1" inputmode="numeric"><span>cm</span></div></label>
+          </div>
+        </div>
+
+        <div class="inspector-group">
+          <h3>전체 도면에서 위치</h3>
+          <div class="two-column-fields">
+            <label><span>왼쪽</span><div class="input-with-unit"><input id="zoneX" type="number" min="0" step="1" inputmode="numeric"><span>cm</span></div></label>
+            <label><span>위쪽</span><div class="input-with-unit"><input id="zoneY" type="number" min="0" step="1" inputmode="numeric"><span>cm</span></div></label>
+          </div>
+        </div>
+
+        <button id="duplicateZoneBtn" class="secondary-btn full-width inspector-single-action" type="button">
+          <svg viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="1"/><path d="M16 8V5H5v11h3"/></svg>
+          구역 복제
+        </button>
+
+        <div class="fit-status" id="zoneFitStatus">
+          <span class="status-dot"></span>
+          <span>전체 도면 안에 들어와 있어요</span>
         </div>
       </section>
 
