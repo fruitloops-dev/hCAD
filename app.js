@@ -50,6 +50,7 @@
   let saveTimer = null;
   let shapeEditId = null;
   let selectedVertexIndex = null;
+  const zoneLabelCache = new WeakMap();
 
   const el = {};
   const ids = [
@@ -240,6 +241,160 @@
       return { x: centerX * factor, y: centerY * factor };
     }
     return points.reduce((sum, point) => ({ x: sum.x + point.x / points.length, y: sum.y + point.y / points.length }), { x: 0, y: 0 });
+  }
+
+  function pointToSegmentDistanceSquared(x, y, start, end) {
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    if (dx !== 0 || dy !== 0) {
+      const progress = ((x - start.x) * dx + (y - start.y) * dy) / (dx * dx + dy * dy);
+      if (progress > 1) {
+        start = end;
+      } else if (progress > 0) {
+        start = { x: start.x + dx * progress, y: start.y + dy * progress };
+      }
+    }
+    dx = x - start.x;
+    dy = y - start.y;
+    return dx * dx + dy * dy;
+  }
+
+  function signedDistanceToPolygon(x, y, points) {
+    let inside = false;
+    let minDistanceSquared = Infinity;
+    for (let index = 0, previousIndex = points.length - 1; index < points.length; previousIndex = index, index += 1) {
+      const current = points[index];
+      const previous = points[previousIndex];
+      if (((current.y > y) !== (previous.y > y)) && (x < (previous.x - current.x) * (y - current.y) / (previous.y - current.y) + current.x)) inside = !inside;
+      minDistanceSquared = Math.min(minDistanceSquared, pointToSegmentDistanceSquared(x, y, previous, current));
+    }
+    return (inside ? 1 : -1) * Math.sqrt(minDistanceSquared);
+  }
+
+  function makeLabelCell(x, y, halfSize, points) {
+    const distance = signedDistanceToPolygon(x, y, points);
+    return { x, y, halfSize, distance, maxDistance: distance + halfSize * Math.SQRT2 };
+  }
+
+  function pushLabelCell(heap, cell) {
+    heap.push(cell);
+    let index = heap.length - 1;
+    while (index > 0) {
+      const parentIndex = Math.floor((index - 1) / 2);
+      if (heap[parentIndex].maxDistance >= cell.maxDistance) break;
+      heap[index] = heap[parentIndex];
+      index = parentIndex;
+    }
+    heap[index] = cell;
+  }
+
+  function popLabelCell(heap) {
+    const root = heap[0];
+    const end = heap.pop();
+    if (heap.length && end) {
+      let index = 0;
+      while (true) {
+        const leftIndex = index * 2 + 1;
+        const rightIndex = leftIndex + 1;
+        if (leftIndex >= heap.length) break;
+        const childIndex = rightIndex < heap.length && heap[rightIndex].maxDistance > heap[leftIndex].maxDistance ? rightIndex : leftIndex;
+        if (heap[childIndex].maxDistance <= end.maxDistance) break;
+        heap[index] = heap[childIndex];
+        index = childIndex;
+      }
+      heap[index] = end;
+    }
+    return root;
+  }
+
+  function findBestLabelPoint(points) {
+    const xs = points.map(point => point.x);
+    const ys = points.map(point => point.y);
+    const minX = Math.min(...xs);
+    const minY = Math.min(...ys);
+    const maxX = Math.max(...xs);
+    const maxY = Math.max(...ys);
+    const width = maxX - minX;
+    const height = maxY - minY;
+    const cellSize = Math.min(width, height);
+    if (!Number.isFinite(cellSize) || cellSize <= 0) return { ...polygonCentroid(points), clearance: 0 };
+
+    const heap = [];
+    const halfSize = cellSize / 2;
+    for (let x = minX; x < maxX; x += cellSize) {
+      for (let y = minY; y < maxY; y += cellSize) pushLabelCell(heap, makeLabelCell(x + halfSize, y + halfSize, halfSize, points));
+    }
+
+    const centroid = polygonCentroid(points);
+    let best = makeLabelCell(centroid.x, centroid.y, 0, points);
+    const boxCenter = makeLabelCell(minX + width / 2, minY + height / 2, 0, points);
+    if (boxCenter.distance > best.distance) best = boxCenter;
+    const precision = Math.max(.5, cellSize / 500);
+    let iterations = 0;
+    while (heap.length && iterations < 20000) {
+      const cell = popLabelCell(heap);
+      iterations += 1;
+      if (cell.distance > best.distance) best = cell;
+      if (cell.maxDistance - best.distance <= precision) continue;
+      const nextHalfSize = cell.halfSize / 2;
+      pushLabelCell(heap, makeLabelCell(cell.x - nextHalfSize, cell.y - nextHalfSize, nextHalfSize, points));
+      pushLabelCell(heap, makeLabelCell(cell.x + nextHalfSize, cell.y - nextHalfSize, nextHalfSize, points));
+      pushLabelCell(heap, makeLabelCell(cell.x - nextHalfSize, cell.y + nextHalfSize, nextHalfSize, points));
+      pushLabelCell(heap, makeLabelCell(cell.x + nextHalfSize, cell.y + nextHalfSize, nextHalfSize, points));
+    }
+    return { x: best.x, y: best.y, clearance: Math.max(0, best.distance) };
+  }
+
+  function polygonSpanAt(points, coordinate, horizontal) {
+    const intersections = [];
+    for (let index = 0; index < points.length; index += 1) {
+      const start = points[index];
+      const end = points[(index + 1) % points.length];
+      const startAxis = horizontal ? start.y : start.x;
+      const endAxis = horizontal ? end.y : end.x;
+      if (!((startAxis <= coordinate && endAxis > coordinate) || (endAxis <= coordinate && startAxis > coordinate))) continue;
+      const progress = (coordinate - startAxis) / (endAxis - startAxis);
+      intersections.push((horizontal ? start.x : start.y) + ((horizontal ? end.x : end.y) - (horizontal ? start.x : start.y)) * progress);
+    }
+    intersections.sort((a, b) => a - b);
+    return intersections;
+  }
+
+  function containingSpan(intersections, position) {
+    for (let index = 0; index + 1 < intersections.length; index += 2) {
+      if (position >= intersections[index] - .01 && position <= intersections[index + 1] + .01) return [intersections[index], intersections[index + 1]];
+    }
+    return null;
+  }
+
+  function estimateTextWidth(text, fontSize) {
+    return [...text].reduce((width, character) => {
+      if (/\s/.test(character)) return width + fontSize * .35;
+      if (/[·.…,:×-]/.test(character)) return width + fontSize * .55;
+      if (/^[\x00-\x7F]$/.test(character)) return width + fontSize * .62;
+      return width + fontSize;
+    }, 0);
+  }
+
+  function getZoneLabelLayout(zone) {
+    const points = getZoneLocalPoints(zone);
+    const key = `${zone.name}|${zone.width}|${zone.depth}|${points.map(point => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(";")}`;
+    const cached = zoneLabelCache.get(zone);
+    if (cached?.key === key) return cached.layout;
+
+    const point = findBestLabelPoint(points);
+    const horizontalSpan = containingSpan(polygonSpanAt(points, point.y, true), point.x);
+    const verticalSpan = containingSpan(polygonSpanAt(points, point.x, false), point.y);
+    const safeWidth = horizontalSpan ? 2 * Math.min(point.x - horizontalSpan[0], horizontalSpan[1] - point.x) : point.clearance * 2;
+    const safeHeight = verticalSpan ? 2 * Math.min(point.y - verticalSpan[0], verticalSpan[1] - point.y) : point.clearance * 2;
+    const innerWidth = Math.max(0, safeWidth - 10);
+    const innerHeight = Math.max(0, safeHeight - 10);
+    const name = innerHeight >= 18 ? compactName(zone.name, innerWidth, 16) : "";
+    const dimensions = `${Math.round(zone.width)}×${Math.round(zone.depth)}`;
+    const showDimensions = Boolean(name) && innerHeight >= 34 && estimateTextWidth(dimensions, 10) <= innerWidth;
+    const layout = { x: point.x, y: point.y, name, dimensions: showDimensions ? dimensions : "", availableWidth: innerWidth };
+    zoneLabelCache.set(zone, { key, layout });
+    return layout;
   }
 
   function normalizeZonePoints(zone) {
@@ -513,17 +668,19 @@
       group.appendChild(svgNode("polygon", { points: pointsText, class: "zone-shape" }));
       if (state.showGrid) group.appendChild(svgNode("rect", { x: zone.x, y: zone.y, width: zone.width, height: zone.depth, class: "grid-fill", "clip-path": `url(#clip-${zone.id})`, "pointer-events": "none" }));
 
-      const minDimension = Math.min(zone.width, zone.depth);
-      const center = polygonCentroid(absolutePoints);
-      if (minDimension >= 55) {
-        const label = svgNode("text", { x: center.x, y: center.y - 5, class: "zone-label" });
-        label.textContent = compactName(zone.name, zone.width);
-        group.appendChild(label);
-      }
-      if (minDimension >= 80) {
-        const dim = svgNode("text", { x: center.x, y: center.y + 14, class: "zone-dim" });
-        dim.textContent = `${zone.width}×${zone.depth}`;
-        group.appendChild(dim);
+      const labelLayout = getZoneLabelLayout(zone);
+      if (labelLayout.name) {
+        const labelGroup = svgNode("g", { class: "zone-label-group", "clip-path": `url(#clip-${zone.id})`, "pointer-events": "none" });
+        const labelY = labelLayout.dimensions ? labelLayout.y - 7 : labelLayout.y;
+        const label = svgNode("text", { x: zone.x + labelLayout.x, y: zone.y + labelY, class: "zone-label", "dominant-baseline": "middle" });
+        label.textContent = labelLayout.name;
+        labelGroup.appendChild(label);
+        if (labelLayout.dimensions) {
+          const dim = svgNode("text", { x: zone.x + labelLayout.x, y: zone.y + labelLayout.y + 10, class: "zone-dim", "dominant-baseline": "middle" });
+          dim.textContent = labelLayout.dimensions;
+          labelGroup.appendChild(dim);
+        }
+        group.appendChild(labelGroup);
       }
 
       group.addEventListener("pointerdown", startZoneDrag);
@@ -560,7 +717,7 @@
       const minDimension = Math.min(fp.width, fp.depth);
       if (minDimension >= 28) {
         const label = svgNode("text", { x: item.x + fp.width / 2, y: item.y + fp.depth / 2 - (minDimension > 45 ? 3 : -4), class: "item-label" });
-        label.textContent = compactName(item.name, fp.width);
+        label.textContent = compactName(item.name, fp.width, 13);
         group.appendChild(label);
       }
       if (minDimension >= 48) {
@@ -627,9 +784,14 @@
     el.floorPlan.appendChild(layer);
   }
 
-  function compactName(name, availableWidth) {
-    const maxChars = Math.max(2, Math.floor(availableWidth / 14));
-    return name.length > maxChars ? `${name.slice(0, Math.max(1, maxChars - 1))}…` : name;
+  function compactName(name, availableWidth, fontSize = 16) {
+    if (estimateTextWidth(name, fontSize) <= availableWidth) return name;
+    let compacted = "";
+    for (const character of name) {
+      if (estimateTextWidth(`${compacted}${character}…`, fontSize) > availableWidth) break;
+      compacted += character;
+    }
+    return compacted ? `${compacted}…` : "";
   }
 
   function addItemSymbol(group, item, fp) {
@@ -1140,14 +1302,29 @@
     ctx.textBaseline = "middle";
     state.zones.forEach(zone => {
       const points = getZoneAbsolutePoints(zone);
-      const center = polygonCentroid(points);
-      const w = zone.width * scale;
-      const h = zone.depth * scale;
-      if (Math.min(w, h) > 54) {
-        ctx.fillStyle = "#332f28";
-        ctx.font = `700 ${Math.max(14, Math.min(24, Math.min(w, h) * .13))}px sans-serif`;
-        ctx.fillText(`${zone.name} · ${Math.round(zone.width)}×${Math.round(zone.depth)}`, ox + center.x * scale, oy + center.y * scale);
+      const labelLayout = getZoneLabelLayout(zone);
+      if (!labelLayout.name) return;
+      const x = ox + (zone.x + labelLayout.x) * scale;
+      const y = oy + (zone.y + labelLayout.y) * scale;
+      const maxWidth = labelLayout.availableWidth * scale;
+      ctx.save();
+      ctx.beginPath();
+      points.forEach((point, index) => {
+        const pointX = ox + point.x * scale;
+        const pointY = oy + point.y * scale;
+        index === 0 ? ctx.moveTo(pointX, pointY) : ctx.lineTo(pointX, pointY);
+      });
+      ctx.closePath();
+      ctx.clip();
+      ctx.fillStyle = "#332f28";
+      ctx.font = `700 ${Math.max(14, Math.min(24, 16 * scale))}px sans-serif`;
+      ctx.fillText(labelLayout.name, x, y + (labelLayout.dimensions ? -7 * scale : 0), maxWidth);
+      if (labelLayout.dimensions) {
+        ctx.fillStyle = "#665e50";
+        ctx.font = `600 ${Math.max(11, Math.min(18, 10 * scale))}px sans-serif`;
+        ctx.fillText(labelLayout.dimensions, x, y + 10 * scale, maxWidth);
       }
+      ctx.restore();
     });
 
     state.items.forEach(item => {
