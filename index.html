@@ -103,6 +103,10 @@
         </div>
         <div class="view-options">
           <label class="toggle-control"><input id="gridToggle" type="checkbox" checked><span>격자</span></label>
+          <label class="grid-size-control" title="격자 표시와 맞춤에 사용할 간격">
+            <span>간격</span>
+            <span class="grid-size-input"><input id="gridSize" type="number" value="20" min="1" max="100" step="1" inputmode="numeric" aria-label="격자 간격"><b>cm</b></span>
+          </label>
           <label class="toggle-control"><input id="snapToggle" type="checkbox" checked><span>격자 맞춤</span></label>
           <button id="resetViewBtn" class="text-btn" type="button">선택 해제</button>
         </div>

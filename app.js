@@ -5,6 +5,8 @@
   const SVG_NS = "http://www.w3.org/2000/svg";
   const ROOM_MIN = 100;
   const ROOM_MAX = 2000;
+  const GRID_MIN = 1;
+  const GRID_MAX = 100;
 
   const presets = [
     { type: "bed", name: "침대", width: 110, depth: 200, kind: "furniture", icon: "<rect x='3' y='7' width='18' height='12' rx='2'/><path d='M3 12h18M7 7v5'/>" },
@@ -52,7 +54,7 @@
   const el = {};
   const ids = [
     "saveState", "undoBtn", "redoBtn", "exportMenuBtn", "roomWidth", "roomDepth", "applyRoomBtn",
-    "zoneGrid", "furnitureGrid", "customFurnitureBtn", "roomNotes", "roomName", "roomSummary", "gridToggle", "snapToggle",
+    "zoneGrid", "furnitureGrid", "customFurnitureBtn", "roomNotes", "roomName", "roomSummary", "gridToggle", "gridSize", "snapToggle",
     "resetViewBtn", "canvasFrame", "floorPlan", "emptyHint", "mobileZoneList", "mobileFurnitureList", "nothingSelected",
     "itemInspector", "itemName", "itemWidth", "itemDepth", "itemX", "itemY", "deleteItemBtn", "rotateItemBtn",
     "zoneInspector", "zoneName", "zoneType", "zoneWidth", "zoneDepth", "zoneX", "zoneY", "deleteZoneBtn",
@@ -68,12 +70,14 @@
       if (!raw) return structuredClone(initialState);
       const parsed = JSON.parse(raw);
       if (!isValidState(parsed)) return structuredClone(initialState);
-      return {
+      const loaded = {
         ...structuredClone(initialState),
         ...parsed,
         room: { ...initialState.room, ...parsed.room },
         selectedId: null
       };
+      loaded.room.grid = normalizeGrid(loaded.room.grid);
+      return loaded;
     } catch (_) {
       return structuredClone(initialState);
     }
@@ -107,6 +111,7 @@
   function restore(serialized) {
     const restored = JSON.parse(serialized);
     state = { ...structuredClone(initialState), ...restored, room: { ...initialState.room, ...restored.room } };
+    state.room.grid = normalizeGrid(state.room.grid);
     shapeEditId = null;
     selectedVertexIndex = null;
     renderAll();
@@ -154,6 +159,11 @@
   function number(value, fallback, min = -Infinity, max = Infinity) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? clamp(parsed, min, max) : fallback;
+  }
+
+  function normalizeGrid(value, fallback = initialState.room.grid) {
+    if (value === null || value === undefined || String(value).trim() === "") return fallback;
+    return Math.round(number(value, fallback, GRID_MIN, GRID_MAX));
   }
 
   function uid(prefix = "item") {
@@ -686,6 +696,7 @@
     el.roomSummary.textContent = `${state.room.width} × ${state.room.depth} cm · 구역 ${state.zones.length}개 · 가구 ${state.items.length}개`;
     el.roomNotes.value = state.room.notes || "";
     el.gridToggle.checked = state.showGrid;
+    el.gridSize.value = state.room.grid;
     el.snapToggle.checked = state.snap;
     document.querySelectorAll("[data-check]").forEach(checkbox => {
       checkbox.checked = Boolean(state.checks?.[checkbox.dataset.check]);
@@ -976,6 +987,17 @@
     showToast("방 크기를 적용했어요");
   }
 
+  function applyGridSize() {
+    const grid = normalizeGrid(el.gridSize.value, state.room.grid);
+    el.gridSize.value = grid;
+    if (grid === state.room.grid) return;
+    pushHistory();
+    state.room.grid = grid;
+    renderPlan();
+    scheduleSave();
+    showToast(`격자 간격을 ${grid}cm로 바꿨어요`);
+  }
+
   function changeSelectedField(field, rawValue) {
     const item = selectedItem();
     if (!item) return;
@@ -1195,6 +1217,7 @@
         };
         state.room.width = number(state.room.width, 360, ROOM_MIN, ROOM_MAX);
         state.room.depth = number(state.room.depth, 320, ROOM_MIN, ROOM_MAX);
+        state.room.grid = normalizeGrid(state.room.grid);
         state.zones.forEach(keepZoneInside);
         state.items.forEach(keepInside);
         el.exportDialog.close();
@@ -1237,6 +1260,14 @@
       scheduleSave();
     });
     el.gridToggle.addEventListener("change", () => { state.showGrid = el.gridToggle.checked; renderPlan(); scheduleSave(); });
+    el.gridSize.addEventListener("change", applyGridSize);
+    el.gridSize.addEventListener("keydown", event => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        applyGridSize();
+        el.gridSize.blur();
+      }
+    });
     el.snapToggle.addEventListener("change", () => { state.snap = el.snapToggle.checked; scheduleSave(); });
     el.resetViewBtn.addEventListener("click", () => {
       state.selectedId = null;

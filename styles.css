@@ -178,6 +178,10 @@ textarea::placeholder { color: #aaa99f; }
 .view-options { display: flex; align-items: center; gap: 10px; }
 .toggle-control { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 700; white-space: nowrap; cursor: pointer; }
 .toggle-control input { width: 14px; height: 14px; accent-color: var(--accent); }
+.grid-size-control { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 700; white-space: nowrap; }
+.grid-size-input { position: relative; display: block; }
+.grid-size-input input { width: 60px; height: 30px; padding: 0 24px 0 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--surface); font-size: 11px; font-weight: 700; }
+.grid-size-input b { position: absolute; top: 50%; right: 7px; transform: translateY(-50%); font-size: 9px; font-weight: 700; pointer-events: none; }
 
 .canvas-frame {
   position: relative;
@@ -237,6 +241,7 @@ textarea::placeholder { color: #aaa99f; }
 .scale-guide span { width: 62px; height: 6px; border: solid var(--line-strong); border-width: 0 1px 1px; }
 .scale-guide b { margin-top: 3px; font-weight: 700; }
 .empty-hint { position: absolute; top: 50%; left: 50%; display: flex; flex-direction: column; gap: 4px; transform: translate(-50%, -50%); text-align: center; pointer-events: none; }
+.empty-hint[hidden] { display: none; }
 .empty-hint strong { font-size: 14px; }
 .empty-hint span { color: var(--muted); font-size: 11px; }
 .workspace-tip { max-width: 900px; display: flex; align-items: center; justify-content: center; gap: 6px; margin: 11px auto 0; color: var(--muted); font-size: 11px; }
@@ -319,6 +324,8 @@ dialog::backdrop { background: rgba(35, 33, 28, .42); backdrop-filter: blur(3px)
   .workspace-toolbar { align-items: flex-start; }
   .view-options { gap: 7px; }
   .view-options .toggle-control:first-child, .view-options .text-btn { display: none; }
+  .grid-size-control > span:first-child { display: none; }
+  .grid-size-input input { width: 56px; }
   #roomName { font-size: 17px; }
   .canvas-frame { min-height: 330px; padding: 32px 25px 39px; border-radius: 14px; }
   #floorPlan { min-height: 280px; max-height: 54vh; }
