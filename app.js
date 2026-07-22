@@ -734,8 +734,21 @@
       el.floorPlan.appendChild(group);
     });
 
+    const activeItem = selectedItem();
+    if (activeItem) {
+      const footprint = getFootprint(activeItem);
+      renderEdgeDimensions([
+        { x: activeItem.x, y: activeItem.y },
+        { x: activeItem.x + footprint.width, y: activeItem.y },
+        { x: activeItem.x + footprint.width, y: activeItem.y + footprint.depth },
+        { x: activeItem.x, y: activeItem.y + footprint.depth }
+      ]);
+    }
     const activeZone = selectedZone();
-    if (activeZone) renderZoneControls(activeZone);
+    if (activeZone) {
+      renderEdgeDimensions(getZoneAbsolutePoints(activeZone));
+      renderZoneControls(activeZone);
+    }
     el.emptyHint.hidden = state.zones.length !== 0;
   }
 
@@ -792,6 +805,53 @@
       compacted += character;
     }
     return compacted ? `${compacted}…` : "";
+  }
+
+  function formatEdgeLength(length) {
+    const rounded = Math.round(length * 10) / 10;
+    return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)} cm`;
+  }
+
+  function renderEdgeDimensions(points) {
+    if (!Array.isArray(points) || points.length < 2) return;
+    const roomMinDimension = Math.min(state.room.width, state.room.depth);
+    const fontSize = clamp(roomMinDimension / 38, 8, 13);
+    const baseOffset = fontSize + 7;
+    const labelHeight = fontSize + 6;
+    const area = points.reduce((sum, point, index) => {
+      const next = points[(index + 1) % points.length];
+      return sum + point.x * next.y - next.x * point.y;
+    }, 0);
+    const outwardDirection = area >= 0 ? 1 : -1;
+    const layer = svgNode("g", { class: "edge-dimension-layer", "aria-hidden": "true", "pointer-events": "none" });
+
+    points.forEach((point, index) => {
+      const next = points[(index + 1) % points.length];
+      const dx = next.x - point.x;
+      const dy = next.y - point.y;
+      const length = Math.hypot(dx, dy);
+      if (length < .1) return;
+
+      const text = formatEdgeLength(length);
+      const labelWidth = estimateTextWidth(text, fontSize) + 8;
+      const extraOffset = length < labelWidth + 4 ? (index % 2) * (fontSize + 7) : 0;
+      const offset = baseOffset + extraOffset;
+      const normalX = outwardDirection * dy / length;
+      const normalY = outwardDirection * -dx / length;
+      const x = (point.x + next.x) / 2 + normalX * offset;
+      const y = (point.y + next.y) / 2 + normalY * offset;
+      let angle = Math.atan2(dy, dx) * 180 / Math.PI;
+      if (angle > 90 || angle < -90) angle += 180;
+
+      const label = svgNode("g", { class: "edge-dimension", transform: `translate(${x} ${y}) rotate(${angle})` });
+      label.appendChild(svgNode("rect", { x: -labelWidth / 2, y: -labelHeight / 2, width: labelWidth, height: labelHeight, rx: labelHeight / 2, class: "edge-dimension-bg" }));
+      const value = svgNode("text", { x: 0, y: 0, class: "edge-dimension-text", "font-size": fontSize, "dominant-baseline": "middle" });
+      value.textContent = text;
+      label.appendChild(value);
+      layer.appendChild(label);
+    });
+
+    el.floorPlan.appendChild(layer);
   }
 
   function addItemSymbol(group, item, fp) {
