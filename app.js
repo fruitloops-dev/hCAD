@@ -34,7 +34,7 @@
 
   const initialState = {
     room: { name: "나의 자취방", width: 360, depth: 320, grid: 20, notes: "" },
-    zones: [{ id: "zone-main", type: "living", name: "방·거실", x: 0, y: 0, width: 360, depth: 320 }],
+    zones: [],
     items: [],
     selectedId: null,
     snap: true,
@@ -1192,7 +1192,7 @@
           ...structuredClone(initialState),
           ...imported,
           room: { ...initialState.room, ...imported.room },
-          zones: (Array.isArray(imported.zones) ? imported.zones : [{ ...initialState.zones[0], width: Number(imported.room.width) || 360, depth: Number(imported.room.depth) || 320 }]).map(zone => ({
+          zones: (Array.isArray(imported.zones) ? imported.zones : []).map(zone => ({
             ...zone,
             id: String(zone.id || uid("zone")),
             type: zonePresets.some(preset => preset.type === zone.type) ? zone.type : "custom",

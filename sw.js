@@ -1,4 +1,4 @@
-const CACHE = "room-picture-v5";
+const CACHE = "room-picture-v6";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", event => {
