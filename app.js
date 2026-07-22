@@ -378,7 +378,11 @@
   }
 
   function getRoomViewport(room = state.room) {
-    const margin = Math.max(42, Math.min(room.width, room.depth) * .15);
+    const margin = Math.max(
+      52,
+      Math.min(room.width, room.depth) * .15,
+      Math.max(room.width, room.depth) * .03
+    );
     return {
       margin,
       width: room.width + margin * 2,
@@ -769,9 +773,27 @@
       el.floorPlan.appendChild(group);
     });
 
-    const widthLabel = svgNode("text", { x: room.width / 2, y: -16, class: "wall-label" });
+    const wallLabelSize = Math.min(13 * textScale, margin * .48);
+    const wallLabelOffset = Math.min(margin * .52, wallLabelSize * 1.05 + 2);
+    const wallLabelStyle = `font-size: ${wallLabelSize}px`;
+    const widthLabel = svgNode("text", {
+      x: room.width / 2,
+      y: -wallLabelOffset,
+      class: "wall-label",
+      "font-size": wallLabelSize,
+      style: wallLabelStyle,
+      "dominant-baseline": "middle"
+    });
     widthLabel.textContent = `${room.width} cm`;
-    const depthLabel = svgNode("text", { x: -19, y: room.depth / 2, class: "wall-label", transform: `rotate(-90 -19 ${room.depth / 2})` });
+    const depthLabel = svgNode("text", {
+      x: -wallLabelOffset,
+      y: room.depth / 2,
+      class: "wall-label",
+      "font-size": wallLabelSize,
+      style: wallLabelStyle,
+      "dominant-baseline": "middle",
+      transform: `rotate(-90 ${-wallLabelOffset} ${room.depth / 2})`
+    });
     depthLabel.textContent = `${room.depth} cm`;
     el.floorPlan.append(widthLabel, depthLabel);
 
@@ -843,6 +865,7 @@
         { x: activeItem.x + footprint.width, y: activeItem.y + footprint.depth },
         { x: activeItem.x, y: activeItem.y + footprint.depth }
       ]);
+      renderItemControls(activeItem);
     }
     const activeZone = selectedZone();
     if (activeZone) {
@@ -853,7 +876,7 @@
   }
 
   function renderZoneControls(zone) {
-    const handleSize = Math.max(8, Math.min(state.room.width, state.room.depth) / 36);
+    const handleSize = 8 * getPlanTextScale();
     const layer = svgNode("g", { class: "zone-control-layer", "data-id": zone.id });
     layer.appendChild(svgNode("rect", { x: zone.x, y: zone.y, width: zone.width, height: zone.depth, class: "zone-bounds" }));
 
@@ -952,6 +975,46 @@
       layer.appendChild(label);
     });
 
+    el.floorPlan.appendChild(layer);
+  }
+
+  function renderItemControls(item) {
+    const footprint = getFootprint(item);
+    const handleSize = 8 * getPlanTextScale();
+    const layer = svgNode("g", { class: "item-control-layer", "data-id": item.id });
+    layer.appendChild(svgNode("rect", {
+      x: item.x,
+      y: item.y,
+      width: footprint.width,
+      height: footprint.depth,
+      class: "zone-bounds item-bounds"
+    }));
+    const handles = {
+      nw: [item.x, item.y],
+      n: [item.x + footprint.width / 2, item.y],
+      ne: [item.x + footprint.width, item.y],
+      e: [item.x + footprint.width, item.y + footprint.depth / 2],
+      se: [item.x + footprint.width, item.y + footprint.depth],
+      s: [item.x + footprint.width / 2, item.y + footprint.depth],
+      sw: [item.x, item.y + footprint.depth],
+      w: [item.x, item.y + footprint.depth / 2]
+    };
+    Object.entries(handles).forEach(([name, [x, y]]) => {
+      const handle = svgNode("rect", {
+        x: x - handleSize / 2,
+        y: y - handleSize / 2,
+        width: handleSize,
+        height: handleSize,
+        rx: handleSize * .15,
+        class: "resize-handle item-resize-handle",
+        "data-handle": name
+      });
+      handle.dataset.id = item.id;
+      handle.dataset.handle = name;
+      handle.setAttribute("aria-label", `${name} 방향으로 가구 크기 조절`);
+      handle.addEventListener("pointerdown", startItemResize);
+      layer.appendChild(handle);
+    });
     el.floorPlan.appendChild(layer);
   }
 
@@ -1119,6 +1182,29 @@
     el.floorPlan.addEventListener("pointercancel", endDrag);
   }
 
+  function startItemResize(event) {
+    if (event.button !== undefined && event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const id = event.currentTarget.dataset.id;
+    const item = state.items.find(candidate => candidate.id === id);
+    if (!item) return;
+    pushHistory();
+    drag = {
+      kind: "item-resize",
+      id,
+      handle: event.currentTarget.dataset.handle,
+      pointerId: event.pointerId,
+      original: structuredClone(item),
+      originalFootprint: getFootprint(item),
+      moved: false
+    };
+    el.floorPlan.setPointerCapture?.(event.pointerId);
+    el.floorPlan.addEventListener("pointermove", moveDrag);
+    el.floorPlan.addEventListener("pointerup", endDrag);
+    el.floorPlan.addEventListener("pointercancel", endDrag);
+  }
+
   function startVertexDrag(event) {
     if (event.button !== undefined && event.button !== 0) return;
     event.preventDefault();
@@ -1236,6 +1322,55 @@
     renderInspector();
   }
 
+  function moveItemResize(event) {
+    const item = state.items.find(candidate => candidate.id === drag.id);
+    if (!item) return;
+    const point = svgPoint(event);
+    if (state.snap) {
+      point.x = Math.round(point.x / state.room.grid) * state.room.grid;
+      point.y = Math.round(point.y / state.room.grid) * state.room.grid;
+    }
+    const original = drag.original;
+    const originalFootprint = drag.originalFootprint;
+    const right = original.x + originalFootprint.width;
+    const bottom = original.y + originalFootprint.depth;
+    const minimumSize = 10;
+    const maximumSize = 1000;
+    let x = original.x;
+    let y = original.y;
+    let width = originalFootprint.width;
+    let depth = originalFootprint.depth;
+    const handle = drag.handle;
+
+    if (handle.includes("e")) width = clamp(point.x - original.x, minimumSize, Math.min(maximumSize, state.room.width - original.x));
+    if (handle.includes("w")) {
+      x = clamp(point.x, Math.max(0, right - maximumSize), right - minimumSize);
+      width = right - x;
+    }
+    if (handle.includes("s")) depth = clamp(point.y - original.y, minimumSize, Math.min(maximumSize, state.room.depth - original.y));
+    if (handle.includes("n")) {
+      y = clamp(point.y, Math.max(0, bottom - maximumSize), bottom - minimumSize);
+      depth = bottom - y;
+    }
+
+    item.x = x;
+    item.y = y;
+    if (original.rotation % 180 === 90) {
+      item.width = depth;
+      item.depth = width;
+    } else {
+      item.width = width;
+      item.depth = depth;
+    }
+    drag.moved = drag.moved
+      || Math.abs(width - originalFootprint.width) > .1
+      || Math.abs(depth - originalFootprint.depth) > .1
+      || Math.abs(x - original.x) > .1
+      || Math.abs(y - original.y) > .1;
+    renderPlan();
+    renderInspector();
+  }
+
   function moveZoneVertex(event) {
     const zone = state.zones.find(candidate => candidate.id === drag.id);
     if (!zone || !Array.isArray(zone.points)) return;
@@ -1256,6 +1391,7 @@
   function moveDrag(event) {
     if (!drag || event.pointerId !== drag.pointerId) return;
     if (drag.kind === "zone-resize") return moveZoneResize(event);
+    if (drag.kind === "item-resize") return moveItemResize(event);
     if (drag.kind === "zone-vertex") return moveZoneVertex(event);
     const subject = drag.kind === "zone" ? state.zones.find(candidate => candidate.id === drag.id) : state.items.find(candidate => candidate.id === drag.id);
     if (!subject) return;

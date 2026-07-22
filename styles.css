@@ -227,7 +227,7 @@ textarea::placeholder { color: #aaa99f; }
 .edge-dimension-layer { pointer-events: none; }
 .edge-dimension-bg { fill: rgba(255, 253, 249, .94); stroke: var(--line-strong); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .edge-dimension-text { fill: var(--ink); font-family: var(--font); font-weight: 800; text-anchor: middle; }
-.zone-control-layer { color: var(--accent); }
+.zone-control-layer, .item-control-layer { color: var(--accent); }
 .zone-bounds { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; pointer-events: none; }
 .resize-handle { fill: var(--surface); stroke: currentColor; stroke-width: 2; vector-effect: non-scaling-stroke; }
 .resize-handle[data-handle="n"], .resize-handle[data-handle="s"] { cursor: ns-resize; }
