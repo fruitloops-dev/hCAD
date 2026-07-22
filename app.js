@@ -370,15 +370,79 @@
   function estimateTextWidth(text, fontSize) {
     return [...text].reduce((width, character) => {
       if (/\s/.test(character)) return width + fontSize * .35;
-      if (/[·.…,:×-]/.test(character)) return width + fontSize * .55;
+      if (character === "…") return width + fontSize;
+      if (/[·.,:×-]/.test(character)) return width + fontSize * .55;
       if (/^[\x00-\x7F]$/.test(character)) return width + fontSize * .62;
       return width + fontSize;
     }, 0);
   }
 
+  function getRoomViewport(room = state.room) {
+    const margin = Math.max(42, Math.min(room.width, room.depth) * .15);
+    return {
+      margin,
+      width: room.width + margin * 2,
+      height: room.depth + margin * 2
+    };
+  }
+
+  function getPlanTextScale(room = state.room) {
+    const viewport = getRoomViewport(room);
+    const reference = getRoomViewport(initialState.room);
+    const bounds = el.floorPlan?.getBoundingClientRect();
+    const displayWidth = Math.max(1, bounds?.width || viewport.width);
+    const displayHeight = Math.max(1, bounds?.height || viewport.height);
+    const currentUnitsPerPixel = Math.max(viewport.width / displayWidth, viewport.height / displayHeight);
+    const referenceUnitsPerPixel = Math.max(reference.width / displayWidth, reference.height / displayHeight);
+    return clamp(currentUnitsPerPixel / referenceUnitsPerPixel, 1, 6);
+  }
+
+  function getContainedLabelLayout(name, dimensions, width, height, textScale, nameBaseSize, dimensionBaseSize) {
+    const innerWidth = Math.max(0, width - 10);
+    const innerHeight = Math.max(0, height - 10);
+    const desiredNameSize = nameBaseSize * textScale;
+    const desiredDimensionSize = dimensionBaseSize * textScale;
+    let nameFontSize = Math.min(desiredNameSize, innerHeight * .72);
+    let visibleName = compactName(name, innerWidth, nameFontSize);
+
+    if (!visibleName && name) {
+      const shortestLabel = `${[...name][0]}…`;
+      nameFontSize = Math.min(nameFontSize, innerWidth / Math.max(estimateTextWidth(shortestLabel, 1), 1));
+      visibleName = compactName(name, innerWidth, nameFontSize);
+    }
+
+    if (!visibleName || nameFontSize < desiredNameSize * .55) {
+      return { name: "", dimensions: "", nameFontSize: 0, dimensionFontSize: 0, nameOffset: 0, dimensionOffset: 0, availableWidth: innerWidth };
+    }
+
+    const dimensionFontSize = Math.min(
+      desiredDimensionSize,
+      innerWidth / Math.max(estimateTextWidth(dimensions, 1), 1)
+    );
+    const gap = 3 * textScale;
+    const showDimensions = dimensions
+      && dimensionFontSize >= desiredDimensionSize * .62
+      && innerHeight >= nameFontSize + dimensionFontSize + gap;
+
+    if (!showDimensions) {
+      return { name: visibleName, dimensions: "", nameFontSize, dimensionFontSize: 0, nameOffset: 0, dimensionOffset: 0, availableWidth: innerWidth };
+    }
+
+    return {
+      name: visibleName,
+      dimensions,
+      nameFontSize,
+      dimensionFontSize,
+      nameOffset: -(dimensionFontSize + gap) / 2,
+      dimensionOffset: (nameFontSize + gap) / 2,
+      availableWidth: innerWidth
+    };
+  }
+
   function getZoneLabelLayout(zone) {
     const points = getZoneLocalPoints(zone);
-    const key = `${zone.name}|${zone.width}|${zone.depth}|${points.map(point => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(";")}`;
+    const textScale = getPlanTextScale();
+    const key = `${zone.name}|${zone.width}|${zone.depth}|${textScale.toFixed(4)}|${points.map(point => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(";")}`;
     const cached = zoneLabelCache.get(zone);
     if (cached?.key === key) return cached.layout;
 
@@ -387,12 +451,12 @@
     const verticalSpan = containingSpan(polygonSpanAt(points, point.x, false), point.y);
     const safeWidth = horizontalSpan ? 2 * Math.min(point.x - horizontalSpan[0], horizontalSpan[1] - point.x) : point.clearance * 2;
     const safeHeight = verticalSpan ? 2 * Math.min(point.y - verticalSpan[0], verticalSpan[1] - point.y) : point.clearance * 2;
-    const innerWidth = Math.max(0, safeWidth - 10);
-    const innerHeight = Math.max(0, safeHeight - 10);
-    const name = innerHeight >= 18 ? compactName(zone.name, innerWidth, 16) : "";
     const dimensions = `${Math.round(zone.width)}×${Math.round(zone.depth)}`;
-    const showDimensions = Boolean(name) && innerHeight >= 34 && estimateTextWidth(dimensions, 10) <= innerWidth;
-    const layout = { x: point.x, y: point.y, name, dimensions: showDimensions ? dimensions : "", availableWidth: innerWidth };
+    const layout = {
+      x: point.x,
+      y: point.y,
+      ...getContainedLabelLayout(zone.name, dimensions, safeWidth, safeHeight, textScale, 16, 10)
+    };
     zoneLabelCache.set(zone, { key, layout });
     return layout;
   }
@@ -630,7 +694,8 @@
 
   function renderPlan() {
     const room = state.room;
-    const margin = Math.max(42, Math.min(room.width, room.depth) * .15);
+    const { margin } = getRoomViewport(room);
+    const textScale = getPlanTextScale(room);
     el.floorPlan.setAttribute("viewBox", `${-margin} ${-margin} ${room.width + margin * 2} ${room.depth + margin * 2}`);
     el.floorPlan.innerHTML = "";
 
@@ -671,12 +736,25 @@
       const labelLayout = getZoneLabelLayout(zone);
       if (labelLayout.name) {
         const labelGroup = svgNode("g", { class: "zone-label-group", "clip-path": `url(#clip-${zone.id})`, "pointer-events": "none" });
-        const labelY = labelLayout.dimensions ? labelLayout.y - 7 : labelLayout.y;
-        const label = svgNode("text", { x: zone.x + labelLayout.x, y: zone.y + labelY, class: "zone-label", "dominant-baseline": "middle" });
+        const label = svgNode("text", {
+          x: zone.x + labelLayout.x,
+          y: zone.y + labelLayout.y + labelLayout.nameOffset,
+          class: "zone-label",
+          "font-size": labelLayout.nameFontSize,
+          style: `font-size: ${labelLayout.nameFontSize}px`,
+          "dominant-baseline": "middle"
+        });
         label.textContent = labelLayout.name;
         labelGroup.appendChild(label);
         if (labelLayout.dimensions) {
-          const dim = svgNode("text", { x: zone.x + labelLayout.x, y: zone.y + labelLayout.y + 10, class: "zone-dim", "dominant-baseline": "middle" });
+          const dim = svgNode("text", {
+            x: zone.x + labelLayout.x,
+            y: zone.y + labelLayout.y + labelLayout.dimensionOffset,
+            class: "zone-dim",
+            "font-size": labelLayout.dimensionFontSize,
+            style: `font-size: ${labelLayout.dimensionFontSize}px`,
+            "dominant-baseline": "middle"
+          });
           dim.textContent = labelLayout.dimensions;
           labelGroup.appendChild(dim);
         }
@@ -714,15 +792,37 @@
       group.appendChild(svgNode("rect", { x: item.x, y: item.y, width: fp.width, height: fp.depth, rx: Math.min(6, fp.width / 10, fp.depth / 10), class: "furniture-shape" }));
       addItemSymbol(group, item, fp);
 
-      const minDimension = Math.min(fp.width, fp.depth);
-      if (minDimension >= 28) {
-        const label = svgNode("text", { x: item.x + fp.width / 2, y: item.y + fp.depth / 2 - (minDimension > 45 ? 3 : -4), class: "item-label" });
-        label.textContent = compactName(item.name, fp.width, 13);
+      const itemLabelLayout = getContainedLabelLayout(
+        item.name,
+        `${item.width}×${item.depth}`,
+        fp.width,
+        fp.depth,
+        textScale,
+        13,
+        9
+      );
+      if (itemLabelLayout.name) {
+        const label = svgNode("text", {
+          x: item.x + fp.width / 2,
+          y: item.y + fp.depth / 2 + itemLabelLayout.nameOffset,
+          class: "item-label",
+          "font-size": itemLabelLayout.nameFontSize,
+          style: `font-size: ${itemLabelLayout.nameFontSize}px`,
+          "dominant-baseline": "middle"
+        });
+        label.textContent = itemLabelLayout.name;
         group.appendChild(label);
       }
-      if (minDimension >= 48) {
-        const dim = svgNode("text", { x: item.x + fp.width / 2, y: item.y + fp.depth / 2 + 13, class: "item-dim" });
-        dim.textContent = `${item.width}×${item.depth}`;
+      if (itemLabelLayout.dimensions) {
+        const dim = svgNode("text", {
+          x: item.x + fp.width / 2,
+          y: item.y + fp.depth / 2 + itemLabelLayout.dimensionOffset,
+          class: "item-dim",
+          "font-size": itemLabelLayout.dimensionFontSize,
+          style: `font-size: ${itemLabelLayout.dimensionFontSize}px`,
+          "dominant-baseline": "middle"
+        });
+        dim.textContent = itemLabelLayout.dimensions;
         group.appendChild(dim);
       }
 
@@ -814,10 +914,11 @@
 
   function renderEdgeDimensions(points) {
     if (!Array.isArray(points) || points.length < 2) return;
-    const roomMinDimension = Math.min(state.room.width, state.room.depth);
-    const fontSize = clamp(roomMinDimension / 38, 8, 13);
-    const baseOffset = fontSize + 7;
-    const labelHeight = fontSize + 6;
+    const textScale = getPlanTextScale();
+    const fontSize = 8 * textScale;
+    const horizontalPadding = 8 * textScale;
+    const baseOffset = fontSize + 7 * textScale;
+    const labelHeight = fontSize + 6 * textScale;
     const area = points.reduce((sum, point, index) => {
       const next = points[(index + 1) % points.length];
       return sum + point.x * next.y - next.x * point.y;
@@ -833,8 +934,8 @@
       if (length < .1) return;
 
       const text = formatEdgeLength(length);
-      const labelWidth = estimateTextWidth(text, fontSize) + 8;
-      const extraOffset = length < labelWidth + 4 ? (index % 2) * (fontSize + 7) : 0;
+      const labelWidth = estimateTextWidth(text, fontSize) + horizontalPadding;
+      const extraOffset = length < labelWidth + 4 * textScale ? (index % 2) * (fontSize + 7 * textScale) : 0;
       const offset = baseOffset + extraOffset;
       const normalX = outwardDirection * dy / length;
       const normalY = outwardDirection * -dx / length;
@@ -1377,12 +1478,12 @@
       ctx.closePath();
       ctx.clip();
       ctx.fillStyle = "#332f28";
-      ctx.font = `700 ${Math.max(14, Math.min(24, 16 * scale))}px sans-serif`;
-      ctx.fillText(labelLayout.name, x, y + (labelLayout.dimensions ? -7 * scale : 0), maxWidth);
+      ctx.font = `700 ${Math.max(14, Math.min(32, labelLayout.nameFontSize * scale))}px sans-serif`;
+      ctx.fillText(labelLayout.name, x, y + labelLayout.nameOffset * scale, maxWidth);
       if (labelLayout.dimensions) {
         ctx.fillStyle = "#665e50";
-        ctx.font = `600 ${Math.max(11, Math.min(18, 10 * scale))}px sans-serif`;
-        ctx.fillText(labelLayout.dimensions, x, y + 10 * scale, maxWidth);
+        ctx.font = `600 ${Math.max(11, Math.min(22, labelLayout.dimensionFontSize * scale))}px sans-serif`;
+        ctx.fillText(labelLayout.dimensions, x, y + labelLayout.dimensionOffset * scale, maxWidth);
       }
       ctx.restore();
     });
