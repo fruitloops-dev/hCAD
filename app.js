@@ -1529,7 +1529,7 @@
 
   function exportJson() {
     const data = {
-      app: "방그림",
+      app: "hCAD",
       version: 3,
       exportedAt: new Date().toISOString(),
       ...JSON.parse(snapshot()),
@@ -1645,7 +1645,7 @@
     ctx.textAlign = "left";
     ctx.fillStyle = "#74776d";
     ctx.font = "16px sans-serif";
-    ctx.fillText("방그림에서 만든 배치도", margin, canvas.height - 25);
+    ctx.fillText("hCAD에서 만든 배치도", margin, canvas.height - 25);
     canvas.toBlob(blob => {
       if (!blob) return showToast("이미지를 만들지 못했어요");
       downloadBlob(blob, safeFilename("png"));
@@ -1699,7 +1699,7 @@
         scheduleSave();
         showToast("도면을 불러왔어요");
       } catch (_) {
-        showToast("올바른 방그림 파일이 아니에요");
+        showToast("올바른 hCAD 파일이 아니에요");
       } finally {
         el.importJsonInput.value = "";
       }

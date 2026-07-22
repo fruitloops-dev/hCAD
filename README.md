@@ -1,10 +1,10 @@
-# 방그림
+# hCAD
 
 빈 자취방의 실측 치수로 평면도를 만들고 가구 배치를 미리 시험할 수 있는 모바일 친화적 웹앱입니다.
 
 ## 바로 사용하기
 
-**[방그림 실행하기](https://fruitloops-dev.github.io/hCAD/)**
+**[hCAD 실행하기](https://fruitloops-dev.github.io/hCAD/)**
 
 GitHub Pages에서 별도의 설치 없이 바로 사용할 수 있습니다. 처음 접속한 뒤에는 오프라인에서도 주요 기능을 사용할 수 있습니다.
 
