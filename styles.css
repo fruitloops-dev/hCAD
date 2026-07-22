@@ -180,7 +180,8 @@ textarea::placeholder { color: #aaa99f; }
 .toggle-control input { width: 14px; height: 14px; accent-color: var(--accent); }
 .grid-size-control { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 700; white-space: nowrap; }
 .grid-size-input { position: relative; display: block; }
-.grid-size-input input { width: 60px; height: 30px; padding: 0 24px 0 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--surface); font-size: 11px; font-weight: 700; }
+.grid-size-input input { width: 72px; height: 32px; padding: 0 27px 0 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--surface); font-size: 12px; font-weight: 700; appearance: textfield; }
+.grid-size-input input::-webkit-inner-spin-button, .grid-size-input input::-webkit-outer-spin-button { margin: 0; appearance: none; }
 .grid-size-input b { position: absolute; top: 50%; right: 7px; transform: translateY(-50%); font-size: 9px; font-weight: 700; pointer-events: none; }
 
 .canvas-frame {
@@ -325,7 +326,7 @@ dialog::backdrop { background: rgba(35, 33, 28, .42); backdrop-filter: blur(3px)
   .view-options { gap: 7px; }
   .view-options .toggle-control:first-child, .view-options .text-btn { display: none; }
   .grid-size-control > span:first-child { display: none; }
-  .grid-size-input input { width: 56px; }
+  .grid-size-input input { width: 68px; }
   #roomName { font-size: 17px; }
   .canvas-frame { min-height: 330px; padding: 32px 25px 39px; border-radius: 14px; }
   #floorPlan { min-height: 280px; max-height: 54vh; }
